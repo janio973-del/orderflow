@@ -1,0 +1,4277 @@
+//MIT License Copyright (c) 2022 Sidlercom
+//
+//Permission is hereby granted, free of charge, to any person obtaining a copy
+//of this software and associated documentation files (the "Software"), to deal
+//in the Software without restriction, including without limitation the rights
+//to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//copies of the Software, and to permit persons to whom the Software is
+//furnished to do so, subject to the following conditions:
+//
+//The above copyright notice and this permission notice shall be included in all
+//copies or substantial portions of the Software.
+//
+//THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//SOFTWARE.
+
+#region Using declarations
+
+using C5;
+using Loyc.Collections;
+using NinjaTrader.Cbi;
+using NinjaTrader.Core;
+using NinjaTrader.Data;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.NinjaScript.AddOns.Sidi;
+using NinjaTrader.NinjaScript.DrawingTools;
+using NinjaTrader.NinjaScript.DrawingTools.Sidi;
+using SharpDX;
+using SharpDX.Direct2D1;
+using SharpDX.DirectWrite;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
+using System.Windows;
+using System.Windows.Media;
+using System.Xml.Serialization;
+using Brushes = System.Windows.Media.Brushes;
+using Factory = SharpDX.DirectWrite.Factory;
+using FontFamily = System.Windows.Media.FontFamily;
+using RectangleF = SharpDX.RectangleF;
+
+#endregion
+
+#region Change Log
+
+/// Discord User: Sidlercom#5465
+/// Discord Server: Make me a friend request on Discord and I'll send you access to the free download server.
+/// Please report bugs via Discord!
+///
+///--------------------------------------Version 1.0-------------------------------------------
+///
+/// 25.Oct.2021 - Revise the whole indicator
+///					 -	Add FootprintBarColor == VolumeProfile => in this mode, we can see a volumeprofile from left to right with color saturation based on volume.
+///					 -	Add FootprintBarSeparatorStyle => Separator style in the fottprint bar can set between "Off", "Line", "l", "o", "x".
+///					 - Fixed => Footprint bar wick now no longer drawn inside the bar body.
+/// 26.Oct.2021 - Add total bar volume in statistic.
+/// 10.Oct.2021 -	Add stacked imbalances, show in chart as rectangle, and when is broken delete it.
+/// 12.Nov.2021 -	Broken stacked balances can now still be displayed if selected. Own colors and transparency for active and broken levels.
+/// 16.Nov.2021 -	Add ZAxis property (Used to assign a unique identifier representing the index in which chart objects are drawn on the chart's Z-axis (front to back ordering).
+///
+///--------------------------------------Update v1.1-------------------------------------------
+///
+/// 01.Dec.2021 - Add some props (X-Offset canvas right, realtime render, max days to load etc.).
+///					  - Add intraday volume profile on the right side (each price level with total vol, bid vol, ask vol).
+///					  - Add vp value area values (poc, vah, val).
+///					  - Add price maker (price line for lastprice).
+///
+///--------------------------------------Update v1.2-------------------------------------------
+///
+/// 07.Dec.2021 -	Fixed => Drawing objects were not displayed until the chart was clicked once the indicator had been loaded. OnRenderTargetChanged() removed => ChartControl == null || ChartBars == null
+/// 09.Dec.2021 -	Add ask/bid price marker near candle. The last traded price is displayed with full color, the other price with dimmed color.
+///					  -	Add propertie "AskBidMarkerMode" and separat colors for ask/bid price/volume marker.
+/// 15.Dec.2021 -	Add new function "hotkeys", for now only "HotKey1" is available.
+///								-	Small adjustment of bid/ask line in profile volume text. Transparency of the line adjusted.
+///
+///--------------------------------------Update v1.3-------------------------------------------
+///
+/// 20.Dec.2021 -	Background process for resizing has been improved and is no longer calculated for each bar, only once before rendering the bar.
+/// 21.Dec.2021 -	Cleanup rendering code.
+/// 22.Dec.2021 - Add PropertyConverter for some Properties.
+///					  - Add own color for text cell, instead of same color as profile.
+///					  - Width of the text column is now dynamically calculated according to the poc price, instead with a fixed width.
+/// 24.Dec.2021 - The ImbalanceMinValue value was used only for the volume profile. It is now also used for the footprint bars.
+///					  - Add new propertie in VP Values "LineEndMode" for use with "AreaMode == RealtimeOnly".
+///					  - Add new value "Session" in enum propertie "CellColorScale". If on Session, only the session statistic currently displayed on the chart is displayed.
+/// 26.Dec.2021 - Add "SidiEnumDescriptionConverter", allows enums with special characters, for better reading.
+///
+///--------------------------------------Update v1.4-------------------------------------------
+///
+/// 03.Jan.2022 - Draw rectangle for price marker line moved to RenderPriceMarker(). This saves performance because it no longer needs to be rendered twice.
+///					 - Fixed a small problem with the line sepperators. Dividing line between the text column and the volume profile is now drawn correctly.
+///
+///--------------------------------------Update v1.5-------------------------------------------
+///
+/// 10.Jan.2022 - Add null check when no separators set (separatorTextLayout).
+///					- Add own tickSizeValue variable instead of using TickSize.
+///					- Added some checks in CalculateVolumeProfileETH() before access to its values.
+/// 13.Jan.2022	- Limit bar width to a maximum of 5, otherwise it may be that our footprint bars are no longer visible.
+///					- Fix issue => MaxLoadedDays, the footprint bars are now only drawn according to the maximum loaded days.
+///
+///--------------------------------------Update v1.6-------------------------------------------
+///
+/// 21.Feb.2022 - Make some code optimation.
+/// 23.Feb.2022 - Fix issue => GetVpValueArea() sometimes it happened that the vaH/vaL line was not drawn.
+/// 24.Feb.2022 - Add "Profile Cell Color Dependency Mode" we can choose between normal, value area and percent. The profile is colored accordingly.
+/// 25.Feb.2022 - Add "Percentage" to the "VpDeltaBarsColorMode" Property.
+///
+///--------------------------------------Update v1.7-------------------------------------------
+///
+/// 01.Mar.2022 - VA VPoc rectangle changed to a line.
+///					  - Fixed => Dispose changes in OnRender(), some forgotten dispose inserted.
+///					  - Add new property "VpVpocThickness" for the line thickness VaHigh/VaLow/VPoc
+/// 02.Mar.2022 - Remove all Hotkeys for chartscrolling etc. and implement it in the indicator "SidiChartScroll".
+/// 05.Mar.2022 - Add Try/Catch block in "SidiFootprintPropertyConverter".
+///					  - Add Dashstyle prop for the VPoc/Va line => the two lines are now separately adjustable.
+///					  - Smaler performance improvements in OnRender().
+///
+///--------------------------------------Update v1.8-------------------------------------------
+///
+/// 08.Mar.2022 - Fixed issue => Naming convention "Color" is now "Brush". No longer NullReferenzException for "VpVpocBrush" and "VpVaBrush" properties.
+
+#endregion
+
+#region Enums
+
+public enum FootprintStyle
+{
+	[Description("Ask-Bid")]
+	AskBid,
+	Delta
+}
+
+public enum FootprintPocStyle
+{
+	Off,
+	Text,
+	Rectangle
+}
+
+public enum FootprintClusterStyle
+{
+	Brick,
+	[Description("Volume Bar")]
+	VolumeBar,
+	[Description("Volume Profile")]
+	VolumeProfile,
+	None
+}
+
+public enum ColorMode
+{
+	Solid,
+	Saturation
+}
+
+public enum ColorModeDeltaBars
+{
+	Solid,
+	Saturation,
+	Percentage
+}
+
+public enum FpVpColorMode
+{
+	Normal,
+	[Description("Value Area")]
+	ValueArea,
+	Percentage
+}
+
+public enum FootprintBarSeparatorStyle
+{
+	None,
+	Line,
+	l,
+	o,
+	x
+}
+
+public enum FootprintBarBodyStyle
+{
+	None,
+	[Description("Bar no Wick")]
+	BarNoWick,
+	[Description("Bar and Wick")]
+	BarAndWick
+}
+
+public enum ClusterScale
+{
+	Bar,
+	Chart,
+	All
+}
+
+public enum CellColorScale
+{
+	Chart,
+	[Description("Intraday Session")]
+	IntradaySession,
+	All
+}
+
+public enum ClosePriceStyle
+{
+	None,
+	[Description("Colorize Separator")]
+	ColorizeSeparator,
+}
+
+public enum StackedImbalanceVisibilityMode
+{
+	Off,
+	All,
+	[Description("Unbroken only")]
+	UnbrokenOnly
+}
+
+public enum VolumeProfileMode
+{
+	Off,
+	[Description("Profile only")]
+	ProfileOnly,
+	[Description("Profile and Text")]
+	ProfileAndText
+}
+
+public enum VolumeProfileAreaMode
+{
+	Off,
+	All,
+	[Description("Intraday Session")]
+	IntradaySession,
+	[Description("Realtime only")]
+	RealtimeOnly
+}
+
+public enum VolumeProfileLineStartMode
+{
+	[Description("Actual Bar")]
+	ActualBar,
+	[Description("Session Begin")]
+	SessionBegin,
+	Pixel
+}
+
+public enum LastPriceMarkerMode
+{
+	Off,
+	On,
+	[Description("Realtime only")]
+	RealtimeOnly
+}
+
+public enum AskBidPriceVolumeMarkerMode
+{
+	Off,
+	Both,
+	[Description("Volume only")]
+	VolumeOnly,
+	[Description("Ask-Bid Price only")]
+	AskBidPriceOnly,
+}
+
+#endregion
+
+namespace NinjaTrader.NinjaScript.Indicators.Sidi
+{
+	#region PropertiesCategoryOrder
+
+	[CategoryOrder("General", 0)]
+	[CategoryOrder("Footprint Bar", 20)]
+	[CategoryOrder("Imbalance", 30)]
+	[CategoryOrder("Stacked Imbalances", 40)]
+	[CategoryOrder("Statistic", 50)]
+	[CategoryOrder("VP Profile", 60)]
+	[CategoryOrder("VP Values", 61)]
+	[CategoryOrder("Price Marker", 70)]
+	[CategoryOrder("HotKeys", 80)]
+	[CategoryOrder("Debug", 1000)]
+
+	#endregion
+
+	[TypeConverter("NinjaTrader.NinjaScript.Indicators.Sidi.SidiFootprintDependencies.SidiFootprintPropertyConverter")]
+	public class SidiFootprint : Indicator
+	{
+		#region Classes and Structs
+
+		public struct BarValues
+		{
+			public string CurBarStringLengthMax { get; internal set; }
+			public double TotalBarVol { get; internal set; }
+			public double PocPrice { get; internal set; }
+			public double PocVol { get; internal set; }
+			public double AskVolMax { get; internal set; }
+			public double BidVolMax { get; internal set; }
+		}
+
+		public struct Statistic
+		{
+			public double Volume, Delta;
+
+			public Statistic(double volume, double delta)
+			{
+				Volume = volume;
+				Delta = delta;
+			}
+		}
+
+		public class ABV
+		{
+			public int Idx { get; internal set; }
+			public double Price { get; internal set; }
+			public double AskVol { get; internal set; }
+			public double BidVol { get; internal set; }
+			public double PriceVol { get; internal set; }
+			public double PriceDelta { get; internal set; }
+			public bool IsAskImb { get; internal set; }
+			public bool IsBidImb { get; internal set; }
+		}
+
+		public class AskBidVolume
+		{
+			public double PriceVol { get; set; }
+			public double PriceDelta { get; set; }
+			public double AskVol { get; set; }
+			public double BidVol { get; set; }
+			public bool IsAskImb { get; set; }
+			public bool IsBidImb { get; set; }
+
+			public AskBidVolume(double askVol, double bidVol, double priceVol, double priceDelta, bool askImb, bool bidImb)
+			{
+				AskVol = askVol;
+				BidVol = bidVol;
+				PriceVol = priceVol;
+				PriceDelta = priceDelta;
+				IsAskImb = askImb;
+				IsBidImb = bidImb;
+			}
+		}
+
+		public class StackedImbalances
+		{
+			public StackedImbalances()
+			{
+			}
+
+			public StackedImbalances(bool isAskImbalance, double heighestPrice, double lowestPrice)
+			{
+				IsAskImbalance = isAskImbalance;
+				HighestPrice = heighestPrice;
+				LowestPrice = lowestPrice;
+			}
+
+			public bool IsAskImbalance { get; set; }
+
+			public int StartBarIdx { get; set; }
+
+			public int EndBarIdx { get; set; }
+
+			public double HighestPrice { get; set; }
+
+			public double LowestPrice { get; set; }
+		}
+
+		[CLSCompliant(false)]
+		public new class VolumeProfile
+		{
+			public double SessionVol { get; set; }
+
+			public ConcurrentDictionary<double, PriceLevel> VolProfileDict = new ConcurrentDictionary<double, PriceLevel>();
+		}
+
+		public class PriceLevel
+		{
+			public double PriceVol { get; internal set; }
+			public double AskVol { get; internal set; }
+			public double BidVol { get; internal set; }
+		}
+
+		#endregion
+
+		#region Variables
+
+		private readonly string className = MethodBase.GetCurrentMethod().DeclaringType.Name;
+		private string curBarStringLengthMax, transCurBarStringLengthMax;
+
+		private bool showLabel = true, setChartProperties, lastInTransition, isLastHistoricalBarProcessed;
+
+		private int lastBar, priorChartBarsToIndex, sessionStartBarIdx;
+
+		private double tickSizeValue, lastPrice, initialBarWidth, barWidth, curAskVol, curBidVol, curBarDelta, curBarVolTotal, transCurBarDelta, curPriceVol, curBarPocVol, transCurBarPriceVolMax, curPriceDelta;
+		private double nextClosestHigherBidImbalancePrice, nextClosestLowerAskImbalancePrice, transCurBarVolTotal, imbalanceFactor, curBarPocPrice, transCurBarPocPrice;
+		private double curBarAskVolMax, transcurBarAskVolMax, curBarBidVolMax, transcurBarBidVolMax, sessionPocPrice, sessionPocVolume, sessionMaxDtaPrcLevel, vpVaPercentage;
+		private double priorFixedScaleMax, priorFixedScaleMin;
+
+		private float fontOffset, sepOffset, initialBarSpacing, barSpacing, statisticCellHeight, priorTickSizeInPixel, histoWidthMax, tickSizeInPixel, canvasRightOffset, vpDeltaLineWidth;
+
+		private DateTime timeNow, startDate, lastRender;
+		private SimpleFont sf;
+		private GlyphTypeface gtf;
+		private TextFormat footPrintBarTextFormat, statisticTextFormat;
+		private TextLayout separatorTextLayout;
+		private List<ABV> barABVList;
+		private Dictionary<int, BarValues> barValuesDict;
+		private List<StackedImbalances> barStackedImbList, brokenStackedImbList;
+		private TreeDictionary<double, AskBidVolume> curBarBidAskVol, transBidAskVol;
+		private TreeDictionary<int, Statistic> statisticDict;
+		private TreeDictionary<double, StackedImbalances> curStackedImbDict;
+		private Dictionary<string, DxMediaMap> dxmBrushes;
+		private Series<VolumeProfile> volProfile;
+		private ChartScale chartScale;
+		private ChartPanel chartPanel;
+		private StrokeStyle ssVpoc, ssVa;
+		private TextFormat tfVa, tfLimits;
+
+		#endregion
+
+		#region Events and Overrides
+
+		protected override void OnStateChange()
+		{
+			try
+			{
+				switch (State)
+				{
+					#region SetDefaults
+
+					/// SetDefaults is always called when displaying objects in a UI list such as the Indicators dialogue window since temporary objects are created for the purpose of UI display
+					/// � Keep as lean as possible
+					/// � Set default values(pushed to UI)
+
+					case State.SetDefaults:
+
+						#region Brushes
+
+						dxmBrushes = new Dictionary<string, DxMediaMap>();
+						foreach (string brushName in new string[] { "ChartBackgroundColor", "FpBarTextColor","FpBarSeparatorColor", "FpPositiveDeltaColor", "FpNegativeDeltaColor","FpClosePriceColor"
+							,"FpPocColor", "AskImbalanceColor", "BidImbalanceColor","StatisticFontColor","StatisticNeutralColor","StatisticNegativeColor","StatisticPositiveColor"
+							, "StackImbActiveAskColor", "StackImbActiveBidColor","StackImbBrokenAskColor","StackImbBrokenBidColor", "PriceMarkerLastColor","VpVpocBrush","VpTextColor","VpTextCellColor"
+							,"VpCellBrush","VpCellBrushSess1Perc1","VpCellBrushSess1Perc2","VpLastPriceCellColor","VpAskColor","VpBidColor", "VpVaBrush","PriceMarkerAskColor","PriceMarkerBidColor"})
+						{
+							dxmBrushes.Add(brushName, new DxMediaMap());
+						}
+
+						#endregion
+
+						#region General
+
+						Description = @"Displays bid/ask volumes next to candlestick bars and volume profile on the right side.";
+						Name = "SidiFootprint";
+						Version = "v1.8 - 08.Mar.2022";
+						Calculate = Calculate.OnEachTick;
+						IsOverlay = true;
+						DisplayInDataBox = true;
+						DrawOnPricePanel = true;
+						DrawHorizontalGridLines = true;
+						DrawVerticalGridLines = true;
+						PaintPriceMarkers = true;
+						ScaleJustification = ScaleJustification.Right;
+						IsAutoScale = true;
+						IsSuspendedWhileInactive = false;
+
+						MaxLoadedDays = 3;
+						IsLiveRenderingWhenScaling = true;
+						RenderDelay = 100;
+						BarSpacing = 70f;
+						BarWidth = 3.0;
+						ShowCandleStickBars = true;
+						ZAxis = int.MaxValue;
+						CanvasRightOffset = 0.0;
+						ShowLabel = false;
+
+						#endregion
+
+						#region Footprint Bar
+
+						FpBarBodyStyle = FootprintBarBodyStyle.None;
+						FpStyle = FootprintStyle.AskBid;
+						FpClusterStyle = FootprintClusterStyle.VolumeProfile;
+						FpColorMode = ColorMode.Saturation;
+						FpBarSeparatorStyle = FootprintBarSeparatorStyle.x;
+						FootprintFont = new SimpleFont("Arial", 14);
+						FpBarTextColor = Brushes.Black;
+						FpBarTextColorOpacity = 100.0;
+						FpBarSeparatorColor = Brushes.Gray;
+						FpPositiveDeltaColor = Brushes.DodgerBlue;
+						FpNegativeDeltaColor = Brushes.Red;
+						FpClosePriceStyle = ClosePriceStyle.ColorizeSeparator;
+						FpClosePriceColor = Brushes.DeepSkyBlue;
+						FpPocStyle = FootprintPocStyle.Rectangle;
+						FpPocColor = Brushes.Yellow;
+
+						#endregion
+
+						#region Imbalance
+
+						ShowImbalance = true;
+						ImbalanceFactor = 300;
+						ImbalanceMinVol = 0;
+						AskImbalanceColor = Brushes.Lime;
+						BidImbalanceColor = Brushes.Orange;
+
+						#endregion
+
+						#region Stacked Imbalances
+
+						StackedImbalanceVisibilityMode = StackedImbalanceVisibilityMode.UnbrokenOnly;
+						PriceLevelsToCount = 3;
+						StackImbActiveAskColor = Brushes.Lime;
+						StackImbActiveBidColor = Brushes.Orange;
+						StackedImbalanceActiveOpacity = 20.0;
+						StackImbBrokenAskColor = Brushes.Lime;
+						StackImbBrokenBidColor = Brushes.Orange;
+						StackedImbalanceBrokenOpacity = 10.0;
+
+						#endregion
+
+						#region Statistic
+
+						ShowStatistic = true;
+						ShowStatisticLegend = true;
+						ShowStatisticVolume = true;
+						ShowStatisticDelta = true;
+						StatisticCellHeight = 24;
+						StatisticCellColorScale = CellColorScale.Chart;
+						StatisticFont = new SimpleFont("Arial", 16);
+						StatisticFontColor = Brushes.Black;
+						StatisticNeutralColor = Brushes.SteelBlue;
+						StatisticNegativeColor = Brushes.IndianRed;
+						StatisticPositiveColor = Brushes.LimeGreen;
+
+						#endregion
+
+						#region VP Profile
+
+						VpMode = VolumeProfileMode.ProfileAndText;
+						VpTextSize = 11;
+						VpTextColor = Brushes.Black;
+						VpTextCellColor = Brushes.Beige;
+						CellColorMode = ColorMode.Saturation;
+						VpCellColorMode = FpVpColorMode.ValueArea;
+						VpCellBrush = Brushes.SlateGray;
+						VpCellColorPerc1 = 30.0;
+						VpCellBrushPerc1 = Brushes.Blue;
+						VpCellColorPerc2 = 40.0;
+						VpCellBrushPerc2 = Brushes.Crimson;
+						VpAskColor = Brushes.DodgerBlue;
+						VpBidColor = Brushes.Red;
+						VpDeltaBarsColorMode = ColorModeDeltaBars.Percentage;
+						VpDeltaBarOpacity = 66.0;
+						VpDeltaLineColorMode = ColorMode.Solid;
+						VpDeltaLineOpacity = 66.0;
+						VpDeltaLineWidth = 5.0;
+						VpLastPriceCellColor = Brushes.DeepPink;
+						VpLastPriceCellOpacity = 33.0;
+
+						#endregion
+
+						#region VP Area
+
+						VpVaMode = VolumeProfileAreaMode.RealtimeOnly;
+						VpVaLineStartMode = VolumeProfileLineStartMode.ActualBar;
+						VpVaLineLength = 40;
+						//VPoc
+						VpVpocDashStyle = SidiDashStyle.Solid;
+						VpVpocThickness = 2;
+						VpVpocBrush = Brushes.Red;
+						VpVpocOpacity = 100d;
+						//VA
+						VpVaPercentage = 70d;
+						VpVaDashStyle = SidiDashStyle.Dash;
+						VpVaThickness = 2;
+						VpVaBrush = Brushes.Yellow;
+						VpVaOpacity = 100d;
+
+						#endregion
+
+						#region Price Marker
+
+						LastPriceMarkerMode = LastPriceMarkerMode.On;
+						PriceMarkerLastColor = Brushes.DeepPink;
+						PriceMarkerLastOpacity = 25.0;
+						AskBidMarkerMode = AskBidPriceVolumeMarkerMode.Both;
+						PriceMarkerAskColor = Brushes.Green;
+						PriceMarkerBidColor = Brushes.Purple;
+
+						#endregion
+
+						#region Debug
+
+						IsTracingMode = false;
+						IsClearOutputWindow = false;
+						IsLogToLogTab = true;
+						IsLogToLogFile = true;
+						LogFilePath = Globals.UserDataDir + @"log\";
+						IsLogFileOpenOnError = false;
+
+						#endregion
+
+						break;
+
+					#endregion
+
+					#region Configure
+
+					case State.Configure:
+
+						/// Configure is called after a user adds an object to the applied list of objects and presses the OK or Apply button. This state is called only once for the life of the object.
+						/// � Add additional data series via AddDataSeries()
+						/// � Declare custom resources
+
+						//Clear output window at start
+						if (IsClearOutputWindow)
+						{
+							ClearOutputWindow();
+						}
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+						//Set class level variables
+						SetClassLevelVariables();
+						//Add data series
+						if (Bars != null && !Bars.IsTickReplay)
+						{
+							AddDataSeries(BarsPeriodType.Tick, 1);
+						}
+
+						break;
+
+					#endregion
+
+					#region Active
+
+					case State.Active:
+
+						/// Active is called once after the object is configured and is ready to process data (DrawingTools could see multiple calls as internally an object for hit testing is cloned) � Used for objects such as Share Service which do not process lastPrice series data � Indicate the object is ready to being
+						/// processing information
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+
+						break;
+
+					#endregion
+
+					#region DataLoaded
+
+					/// DataLoaded is called only once after all data series have been loaded. � Use for logic that needs to access data related objects like Bars, Instruments, BarsPeriod, TradingHours or instantiating indicators � Notify that all data series have been loaded � Initialize any class level variables(including
+					/// custom Series (T) objects)
+
+					case State.DataLoaded:
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+
+						if (Bars.IsTickReplay)
+						{
+							string indi = string.Format("\"{0}\" don`t support tick replay!", Name);
+							SidiDrawings.TextFixed(this, indi, indi + "\r\nPlease disable tick replay to use this indicator!", TextPosition.TopRight, true, true, true);
+						}
+						if (VpMode != VolumeProfileMode.Off)
+						{
+							volProfile = new Series<VolumeProfile>(this, MaximumBarsLookBack.Infinite);
+						}
+
+						tickSizeValue = BarsArray[0].Instrument.MasterInstrument.TickSize; //Instruments[0].MasterInstrument.tickSizeValue;
+						startDate = Bars.GetStartProcessingDate(Bars.GetTime(BarsArray[0].Count - 1), (MaxLoadedDays - 1) * -1);
+
+						break;
+
+					#endregion
+
+					#region Historical
+
+					/// Historical is called once the object begins to process historical data. This state is called once when running an object in real-time. This object is called multiple times when running a backtest optimization and the property IsInstantiatedOnEachOptimizationIteration is true (default behavior) �
+					/// Notify that the object is processing historical data
+
+					case State.Historical:
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+
+						break;
+
+					#endregion
+
+					#region Transition
+
+					/// Transition is called once as the object has finished processing historical data but before it starts to process realtime data.
+					/// � Notify that the indicator or strategy is is transitioning to realtime data
+					/// � Prepare realtime related resources
+
+					case State.Transition:
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+
+						break;
+
+					#endregion
+
+					#region Realtime
+
+					/// Realtime is called once when the object begins to process realtime data.
+					/// � Notify that the indicator or strategy is processing realtime data
+					/// � Execute realtime related logic
+
+					case State.Realtime:
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+						// subscribe to chart panel mouse down event
+						if (ChartPanel != null)
+						{
+							foreach (ChartScale scale in ChartPanel.Scales)
+							{
+								if (scale.ScaleJustification == ScaleJustification)
+								{
+									chartScale = scale;
+									chartPanel = ChartControl.ChartPanels[chartScale.PanelIndex];
+								}
+							}
+						}
+
+						break;
+
+					#endregion
+
+					#region Terminated
+
+					/// Terminated is called once when the object terminates.
+					/// � Notify the object is shutting down
+					/// � Use to clean up/ dispose of resources
+
+					case State.Terminated:
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+						//disposing
+						Dispose();
+
+						break;
+
+					#endregion
+
+					#region Finalized
+
+					case State.Finalized:
+
+						SidiTracing.Print(IsTracingMode, className, State.ToString());
+
+						break;
+
+						#endregion
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		protected override void OnBarUpdate()
+		{
+			if (TimeNow < startDate || Bars.IsTickReplay)
+			{
+				return;
+			}
+
+			if (BarsInProgress == 0)
+			{
+				//Set our standart candle to transparent since we render our own candles in OnRender
+				if (!ShowCandleStickBars)
+				{
+					BarBrushes[0] = Brushes.Transparent;
+					CandleOutlineBrushes[0] = Brushes.Transparent;
+				}
+				//Save Last historical bar data before transition to realtime and reset values
+				//So we can continue to count the volumes in this bar instead of starting from 1
+				if (CurrentBar + 1 == Bars.Count && State == State.Historical)
+				{
+					SetTransitionValues();
+				}
+				// This lets us know what processing mode we are in if indexOffset == 0 then we are in 'realtime processing mode' if indexOffset is > 0 then we are in 'historical processing mode'
+				int indexOffset = BarsArray[1].Count - 1 - CurrentBars[1];
+				// If we are not Calculate.OnBarClose and we are in Realtime processing mode
+				if (IsFirstTickOfBar && Calculate != Calculate.OnBarClose && State == State.Realtime)
+				{
+					// We always get the last tick after the primary triggers OBU so we update the last bar
+					if (CurrentBars[0] > 0)
+					{
+						SetValues(1);
+					}
+					// We have the last tick of the bar added so now we can reset
+					if (State == State.Realtime && indexOffset == 0)
+					{
+						ResetValues(false);
+					}
+				}
+				else
+				{
+					// We only set the value on the primary to preserve external programmatic access to plot as well as indicator-as-input cases
+					SetValues(0);
+				}
+				// If we are Calculate.OnBarClose or we are in Historical processing mode, we are already update to date on the 1 tick series so we reset here
+				if (Calculate == Calculate.OnBarClose || lastBar != CurrentBars[0] && (State == State.Historical || State == State.Realtime && indexOffset > 0))
+				{
+					ResetValues(false);
+				}
+
+				lastBar = CurrentBars[0];
+			}
+			else if (BarsInProgress == 1)
+			{
+				// The more granular series will open the new session so we have to reset any session related stuff here
+				if (BarsArray[1].IsFirstBarOfSession)
+				{
+					ResetValues(true);
+				}
+				// We only calculate values from the 1 tick series
+				CalculateValues(false);
+			}
+		}
+
+		protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
+		{
+			if (IsInHitTest || ChartControl == null || ChartBars == null || Bars == null || Bars.Instrument == null || Bars.IsTickReplay || statisticDict == null || barABVList == null
+				|| curStackedImbDict == null || RenderTarget == null || dxmBrushes == null || !SidiWPF.IsActiveTab(chartControl))
+			{
+				return;
+			}
+
+			//limit bar width to a maximum of 5, otherwise it may be that our footprint bars are no longer visible.
+			if (chartControl.BarWidth > 5)
+			{
+				chartControl.BarWidth = 5; //13.Jan.2022
+			}
+			//run for the first time when the start variables are set
+			if (!IsLiveRenderingWhenScaling && !setChartProperties)
+			{
+				//if the bar distance changes, we are in scalling mode and do not have to render, so we can save resources.
+				if (barSpacing != chartControl.Properties.BarDistance || priorChartBarsToIndex != ChartBars.ToIndex)
+				{
+					lastRender = DateTime.Now.AddMilliseconds(RenderDelay);
+				}
+				if (DateTime.Now < lastRender)
+				{
+					barSpacing = chartControl.Properties.BarDistance;
+					priorChartBarsToIndex = ChartBars.ToIndex;
+					return;
+				}
+			}
+
+			try
+			{
+				#region Init
+
+				AntialiasMode oldAntialiasMode = RenderTarget.AntialiasMode;
+				RenderTarget.AntialiasMode = AntialiasMode.Aliased;
+				//the number of pixels between the point value passed as a distance to the method
+				tickSizeInPixel = chartScale.GetPixelsForDistance(tickSizeValue);
+				//returns the index from the first chartbar of the session.
+				sessionStartBarIdx = Math.Max(SidiExtensions.GetSessionStartBarIndex(BarsArray[0], chartControl.GetTimeBySlotIndex(ChartBars.ToIndex)), ChartBars.FromIndex);
+				//set the bar spacing, chart width, and some vars, we only want to do this once and not on every render
+				if (setChartProperties)
+				{
+					initialBarSpacing = barSpacing;
+					initialBarWidth = barWidth;
+					chartControl.Properties.BarDistance = barSpacing;
+					chartControl.BarWidth = barWidth;
+					ChartBackgroundColor = ChartControl.Properties.ChartBackground;
+
+					#region create footprint TextFormat
+
+					//create the TextFormat structure for the footprint bars
+					footPrintBarTextFormat = new TextFormat(new Factory(), FootprintFont.Family.ToString(), FootprintFont.Bold ? SharpDX.DirectWrite.FontWeight.Bold
+						: SharpDX.DirectWrite.FontWeight.Normal, FootprintFont.Italic ? SharpDX.DirectWrite.FontStyle.Italic : SharpDX.DirectWrite.FontStyle.Normal, (float)FootprintFont.Size)
+					{
+						WordWrapping = WordWrapping.NoWrap,
+						ParagraphAlignment = ParagraphAlignment.Near
+					};
+					//for measure textsize in pixel
+					Typeface t_face = new Typeface(new FontFamily(FootprintFont.Family.ToString()), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+					t_face.TryGetGlyphTypeface(out gtf);
+					//chart drawing starts from the current lastPrice line down, so for our footprint rectangles we need to offset our footprint bar drawings up a bit so they align with the lastPrice marker
+					fontOffset = (float)(gtf.CapsHeight * FootprintFont.Size);
+
+					#endregion
+
+					#region create textlyout for footprint separator
+
+					switch (FpBarSeparatorStyle)
+					{
+						case FootprintBarSeparatorStyle.l:
+							separatorTextLayout = new TextLayout(Globals.DirectWriteFactory, "l", footPrintBarTextFormat, 5, footPrintBarTextFormat.FontSize);
+							break;
+
+						case FootprintBarSeparatorStyle.o:
+							separatorTextLayout = new TextLayout(Globals.DirectWriteFactory, "o", footPrintBarTextFormat, 5, footPrintBarTextFormat.FontSize);
+							break;
+
+						case FootprintBarSeparatorStyle.x:
+							separatorTextLayout = new TextLayout(Globals.DirectWriteFactory, "x", footPrintBarTextFormat, 5, footPrintBarTextFormat.FontSize);
+							break;
+					}
+
+					if (separatorTextLayout != null)
+					{
+						sepOffset = separatorTextLayout.Metrics.Width / 2;
+					}
+
+					#endregion
+
+					#region create statistic TextFormat
+
+					if (ShowStatistic)
+					{
+						//create the TextFormat structure for the statistic
+						statisticTextFormat = new TextFormat(new Factory(), StatisticFont.Family.ToString(), StatisticFont.Bold ? SharpDX.DirectWrite.FontWeight.Bold : SharpDX.DirectWrite.FontWeight.Normal,
+																StatisticFont.Italic ? SharpDX.DirectWrite.FontStyle.Italic : SharpDX.DirectWrite.FontStyle.Normal, (float)Math.Min(StatisticFont.Size, StatisticCellHeight))
+						{
+							WordWrapping = WordWrapping.NoWrap,
+							ParagraphAlignment = ParagraphAlignment.Center
+						};
+					}
+
+					#endregion
+				}
+
+				VolumeProfile curVp = null;
+				//set volume profile area values (VaH/VaL/Poc/Delta)
+				if (volProfile != null && volProfile.IsValidDataPointAt(ChartBars.ToIndex))
+				{
+					curVp = volProfile.GetValueAt(ChartBars.ToIndex);
+					SetVpAreaValues(curVp.VolProfileDict);
+				}
+
+				#endregion
+
+				#region Draw
+
+				DrawVpValues(chartControl, chartScale);
+				DrawStackedImbalance(chartControl, chartScale);
+				DrawVpProfile(chartControl, chartScale, curVp);
+				DrawPriceMarker(chartControl, chartScale);
+				DrawFootprintBars(chartControl, chartScale);
+				DrawBidAsk(chartControl, chartScale);
+
+				#endregion
+
+				#region Reset
+
+				setChartProperties = false;
+				barSpacing = chartControl.Properties.BarDistance;
+				barWidth = chartControl.BarWidth;
+				priorTickSizeInPixel = tickSizeInPixel;
+				//If changed, do not forget to set the AntialiasMode back to the default value as described above as a best practice
+				RenderTarget.AntialiasMode = oldAntialiasMode;
+
+				#endregion
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+			finally
+			{
+				base.OnRender(chartControl, chartScale);
+			}
+		}
+
+		public override void OnRenderTargetChanged()
+		{
+			if (dxmBrushes == null)
+			{
+				return;
+			}
+
+			try
+			{
+				foreach (System.Collections.Generic.KeyValuePair<string, DxMediaMap> item in dxmBrushes)
+				{
+					if (item.Value.DxBrush != null && !item.Value.DxBrush.IsDisposed)
+					{
+						item.Value.DxBrush.Dispose();
+					}
+
+					if (RenderTarget != null && item.Value.MediaBrush != null)
+					{
+						item.Value.DxBrush = item.Value.MediaBrush.ToDxBrush(RenderTarget);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+			finally
+			{
+				base.OnRenderTargetChanged();
+			}
+		}
+
+		public override string DisplayName
+		{
+			get
+			{
+				return showLabel ? State == State.SetDefaults ? Name : Name + " (" + Version + ") " : "";
+			}
+		}
+
+		#endregion
+
+		#region Methods
+
+		#region Calculate
+
+		private void CalculateValues(bool forceCurrentBar)
+		{
+			try
+			{
+				#region Init
+
+				//This lets us know what processing mode we are in
+				//if indexOffset == 0 and State is Realtime then we are in 'realtime processing mode'
+				//if indexOffset is > 0 then we are in 'historical processing mode'
+				int indexOffset = BarsArray[1].Count - 1 - CurrentBars[1];
+				bool inTransition = State == State.Realtime && indexOffset > 1;
+				//For Calculate.OnBarClose in realtime processing we have to advance the index on the tick series to not be one tick behind
+				//The means, at the end of the 'transition'(where State is Realtime but we are still in historical processing mode)->we have to calculate two ticks(CurrentBars[1] and CurrentBars[1] + 1)
+				if (!inTransition && lastInTransition && !forceCurrentBar && Calculate == Calculate.OnBarClose)
+				{
+					CalculateValues(true);
+				}
+
+				bool useCurrentBar = State == State.Historical || inTransition || Calculate != Calculate.OnBarClose || forceCurrentBar;
+				//This is where we decide what index to use
+				int whatBar = useCurrentBar ? CurrentBars[1] : Math.Min(CurrentBars[1] + 1, BarsArray[1].Count - 1);
+				int whatBar0 = Math.Min(CurrentBars[0] + 1, BarsArray[0].Count - 1);
+				//This is how we get the right tick values
+				double askPrice = BarsArray[1].GetAsk(whatBar);
+				double bidPrice = BarsArray[1].GetBid(whatBar);
+				double volume = BarsArray[1].GetVolume(whatBar);
+				lastPrice = BarsArray[1].GetClose(whatBar);
+
+				#endregion
+
+				#region Accumulate Volume
+
+				//Accumulate ask vol
+				if (lastPrice >= askPrice)
+				{
+					if (curBarBidAskVol.Contains(lastPrice))
+					{
+						curAskVol = curBarBidAskVol[lastPrice].AskVol + volume;
+						curBidVol = curBarBidAskVol[lastPrice].BidVol;
+						curPriceVol = curAskVol + curBidVol;
+						curPriceDelta = curAskVol - curBidVol;
+
+						SetCurBarPocVolPrice(lastPrice);
+						SetCurBarAskVolMax();
+						SetCurBarStringLengthMax();
+
+						#region ask => bid imbalance
+
+						bool curAskImb = false;
+
+						if (FpStyle == FootprintStyle.AskBid)
+						{
+							C5.KeyValuePair<double, AskBidVolume> kvp;
+							curBarBidAskVol.TryPredecessor(lastPrice, out kvp);
+							{
+								//up tick
+								if (kvp.Key > 0)
+								{
+									curAskImb = curAskVol >= curBarBidAskVol[kvp.Key].BidVol * imbalanceFactor && curAskVol >= ImbalanceMinVol;
+									//if we have a uptick, set the bid imbalance
+									curBarBidAskVol[kvp.Key].IsBidImb = curAskVol * imbalanceFactor < curBarBidAskVol[kvp.Key].BidVol && curBarBidAskVol[kvp.Key].BidVol >= ImbalanceMinVol;
+								}
+							}
+						}
+
+						#endregion
+
+						curBarBidAskVol[lastPrice] = new AskBidVolume(curAskVol, curBidVol, curPriceVol, curPriceDelta, curAskImb, curBarBidAskVol[lastPrice].IsBidImb);
+					}
+					else
+					{
+						curAskVol = volume;
+						curBidVol = 0;
+						curPriceVol = volume;
+						curPriceDelta = curAskVol - curBidVol;
+
+						SetCurBarPocVolPrice(lastPrice);
+						SetCurBarAskVolMax();
+						SetCurBarStringLengthMax();
+
+						curBarBidAskVol.Add(lastPrice, new AskBidVolume(curAskVol, curBidVol, curPriceVol, curPriceDelta, false, false));
+					}
+					//statistic
+					CalculateStatistic(whatBar0, volume, false);
+				}
+				//Accumulate bid vol
+				else if (lastPrice <= bidPrice)
+				{
+					if (curBarBidAskVol.Contains(lastPrice))
+					{
+						curAskVol = curBarBidAskVol[lastPrice].AskVol;
+						curBidVol = curBarBidAskVol[lastPrice].BidVol + volume;
+						curPriceVol = curAskVol + curBidVol;
+						curPriceDelta = curAskVol - curBidVol;
+
+						SetCurBarPocVolPrice(lastPrice);
+						SetCurBarAskVolMax();
+						SetCurBarStringLengthMax();
+
+						#region bid => ask imbalance
+
+						bool curBidImb = false;
+
+						if (FpStyle == FootprintStyle.AskBid)
+						{
+							C5.KeyValuePair<double, AskBidVolume> kvp;
+							curBarBidAskVol.TrySuccessor(lastPrice, out kvp);
+							{
+								//down tick
+								if (kvp.Key > 0)
+								{
+									curBidImb = curBidVol >= curBarBidAskVol[kvp.Key].AskVol * imbalanceFactor && curBidVol >= ImbalanceMinVol;
+									//if we have a downtick, set the ask imbalance
+									curBarBidAskVol[kvp.Key].IsAskImb = curBidVol * imbalanceFactor < curBarBidAskVol[kvp.Key].AskVol && curBarBidAskVol[kvp.Key].AskVol >= ImbalanceMinVol;
+								}
+							}
+						}
+
+						#endregion
+
+						curBarBidAskVol[lastPrice] = new AskBidVolume(curAskVol, curBidVol, curPriceVol, curPriceDelta, curBarBidAskVol[lastPrice].IsAskImb, curBidImb);
+					}
+					else
+					{
+						curAskVol = 0;
+						curBidVol = volume;
+						curPriceVol = volume;
+						curPriceDelta = curAskVol - curBidVol;
+
+						SetCurBarPocVolPrice(lastPrice);
+						SetCurBarAskVolMax();
+						SetCurBarStringLengthMax();
+
+						curBarBidAskVol.Add(lastPrice, new AskBidVolume(curAskVol, curBidVol, curPriceVol, curPriceDelta, false, false));
+					}
+					//statistic
+					CalculateStatistic(whatBar0, volume, true);
+				}
+
+				#endregion
+
+				// Stacked Imbalances
+				CalculateStackedImbalances(whatBar0);
+				// ForceRefresh()
+				if (State == State.Realtime)
+				{
+					ForceRefresh();
+				}
+
+				lastInTransition = inTransition;
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void CalculateStatistic(int whatBar0, double volume, bool isSubtract)
+		{
+			curBarVolTotal += volume;
+			curBarDelta = isSubtract ? curBarDelta - volume : curBarDelta + volume;
+
+			if (statisticDict.Contains(whatBar0))
+			{
+				statisticDict[whatBar0] = new Statistic(curBarVolTotal, curBarDelta);
+			}
+			else
+			{
+				statisticDict.Add(whatBar0, new Statistic(curBarVolTotal, curBarDelta));
+			}
+		}
+
+		private void CalculateStackedImbalances(int whatBar0)
+		{
+			if (StackedImbalanceVisibilityMode == StackedImbalanceVisibilityMode.Off)
+			{
+				return;
+			}
+
+			int askImbCount = 1, bidImbCount = 1;
+			double askImbLowestPrice = double.MinValue, askImbHighestPrice = 0.0, bidImbLowestPrice = 0.0, bidImbHighestPrice = double.MaxValue;
+			bool isFirstAskImbLowestPrice = true, isFirstBidImbLowestPrice = true;
+			//reset dictionary, so we can start new at every cycle
+			curStackedImbDict.Clear();
+
+			foreach (C5.KeyValuePair<double, AskBidVolume> item in curBarBidAskVol.ToList())
+			{
+				C5.KeyValuePair<double, AskBidVolume> kvp;
+
+				#region ask imbalance
+
+				if (item.Value.IsAskImb && lastPrice >= item.Key)
+				{
+					//look at the next lower price for an ask imbalance
+					curBarBidAskVol.TryPredecessor(item.Key, out kvp);
+					{
+						if (kvp.Key > 0)
+						{
+							if (kvp.Value.IsAskImb)
+							{
+								//store the lowest ask imbalance price
+								if (isFirstAskImbLowestPrice)
+								{
+									isFirstAskImbLowestPrice = false;
+									askImbLowestPrice = kvp.Key;
+								}
+								//store the highest ask imbalance price
+								askImbHighestPrice = item.Key;
+								askImbCount++;
+							}
+						}
+					}
+				}
+				//reset counter here, so we can save additional stacked imbalances instead of begin count from new.
+				else if (askImbCount > 1)
+				{
+					askImbCount = 1;
+					isFirstAskImbLowestPrice = true;
+				}
+				//if counter is >= "PriceLevelsToCount", we have found an stacked imbalance and store it.
+				if (askImbCount >= PriceLevelsToCount)
+				{
+					//update dict entry
+					if (curStackedImbDict.Keys.Contains(askImbLowestPrice))
+					{
+						curStackedImbDict[askImbLowestPrice] = new StackedImbalances(true, askImbHighestPrice, askImbLowestPrice);
+					}
+					//create new entry in dict
+					else
+					{
+						curStackedImbDict.Add(askImbLowestPrice, new StackedImbalances(true, askImbHighestPrice, askImbLowestPrice));
+					}
+				}
+
+				#endregion
+
+				#region bid imbalance
+
+				if (item.Value.IsBidImb && lastPrice <= item.Key)
+				{
+					//look at the next lower price for an bid imbalance
+					curBarBidAskVol.TryPredecessor(item.Key, out kvp);
+					{
+						if (kvp.Key > 0)
+						{
+							if (kvp.Value.IsBidImb)
+							{
+								//store the lowest bid imbalance price
+								if (isFirstBidImbLowestPrice)
+								{
+									isFirstBidImbLowestPrice = false;
+									bidImbLowestPrice = kvp.Key;
+								}
+								//store the highest bid imbalance price
+								bidImbHighestPrice = item.Key;
+								bidImbCount++;
+							}
+						}
+					}
+				}
+				//reset counter here, so we can save additional stacked imbalances instead of begin count from new.
+				else if (bidImbCount > 1)
+				{
+					bidImbCount = 1;
+					isFirstBidImbLowestPrice = true;
+				}
+				// if counter is >= "PriceLevelsToCount", we have found an stacked imbalance and store it.
+				if (bidImbCount >= PriceLevelsToCount)
+				{
+					//update dict entry
+					if (curStackedImbDict.Keys.Contains(bidImbLowestPrice))
+					{
+						curStackedImbDict[bidImbLowestPrice] = new StackedImbalances(false, bidImbHighestPrice, bidImbLowestPrice);
+					}
+					//create new entry in dict
+					else
+					{
+						curStackedImbDict.Add(bidImbLowestPrice, new StackedImbalances(false, bidImbHighestPrice, bidImbLowestPrice));
+					}
+				}
+
+				#endregion
+			}
+			//get next higher / lower stacked imbalances
+			if (whatBar0 > 0 && (lastPrice > nextClosestHigherBidImbalancePrice || lastPrice < nextClosestLowerAskImbalancePrice))
+			{
+				double priceToRemove = lastPrice > nextClosestHigherBidImbalancePrice ? nextClosestHigherBidImbalancePrice : nextClosestLowerAskImbalancePrice;
+				bool isAskPrice = lastPrice <= nextClosestHigherBidImbalancePrice;
+
+				RemoveClosestStackedImbalance(whatBar0, isAskPrice, priceToRemove);
+				SetNextClosestStackedImbalancePrice();
+			}
+		}
+
+		private void CalculateVolumeProfile(int barsAgo)
+		{
+			if (VpMode == VolumeProfileMode.Off || curBarBidAskVol == null || curBarBidAskVol.Count < 1 || volProfile == null)
+			{
+				return;
+			}
+
+			try
+			{
+				if (volProfile[barsAgo] == null)
+				{
+					volProfile[barsAgo] = new VolumeProfile();
+				}
+
+				volProfile[barsAgo].SessionVol = 0.0;
+				volProfile[barsAgo].VolProfileDict.Clear();
+
+				if (Bars.IsFirstBarOfSessionByIndex(CurrentBar - barsAgo))
+				{
+					if (volProfile[barsAgo] != null && volProfile[barsAgo].VolProfileDict != null) //added 10.01.2022
+					{
+						foreach (C5.KeyValuePair<double, AskBidVolume> kvp in curBarBidAskVol)
+						{
+							if (!volProfile[barsAgo].VolProfileDict.ContainsKey(kvp.Key))
+							{
+								volProfile[barsAgo].VolProfileDict.TryAdd(kvp.Key, new PriceLevel());
+							}
+
+							PriceLevel priceLevel;
+							if (volProfile[barsAgo].VolProfileDict.TryGetValue(kvp.Key, out priceLevel)) //added 10.01.2022
+							{
+								volProfile[barsAgo].SessionVol += kvp.Value.PriceVol;
+								volProfile[barsAgo].VolProfileDict[kvp.Key].PriceVol += kvp.Value.PriceVol;
+								volProfile[barsAgo].VolProfileDict[kvp.Key].AskVol += kvp.Value.AskVol;
+								volProfile[barsAgo].VolProfileDict[kvp.Key].BidVol += kvp.Value.BidVol;
+							}
+						}
+					}
+				}
+				else
+				{
+					int barsAgo1 = barsAgo + 1;
+					if (CurrentBars[0] >= barsAgo1 && volProfile[barsAgo1] != null && volProfile[barsAgo1].VolProfileDict != null) //added 10.01.2022
+					{
+						if (volProfile.IsValidDataPoint(barsAgo1))
+						{
+							volProfile[barsAgo].SessionVol = volProfile[barsAgo1].SessionVol;
+
+							foreach (System.Collections.Generic.KeyValuePair<double, PriceLevel> rd in volProfile[barsAgo1].VolProfileDict)
+							{
+								if (!volProfile[barsAgo].VolProfileDict.ContainsKey(rd.Key))
+								{
+									volProfile[barsAgo].VolProfileDict.TryAdd(rd.Key, new PriceLevel());
+								}
+
+								PriceLevel priceLevel;
+								if (volProfile[barsAgo1].VolProfileDict.TryGetValue(rd.Key, out priceLevel))//added 10.01.2022
+								{
+									volProfile[barsAgo].VolProfileDict[rd.Key].PriceVol = volProfile[barsAgo1].VolProfileDict[rd.Key].PriceVol;
+									volProfile[barsAgo].VolProfileDict[rd.Key].AskVol = volProfile[barsAgo1].VolProfileDict[rd.Key].AskVol;
+									volProfile[barsAgo].VolProfileDict[rd.Key].BidVol = volProfile[barsAgo1].VolProfileDict[rd.Key].BidVol;
+								}
+							}
+							foreach (C5.KeyValuePair<double, AskBidVolume> kvp in curBarBidAskVol)
+							{
+								if (!volProfile[barsAgo].VolProfileDict.ContainsKey(kvp.Key))
+								{
+									volProfile[barsAgo].VolProfileDict.TryAdd(kvp.Key, new PriceLevel());
+								}
+
+								PriceLevel priceLevel;
+								if (volProfile[barsAgo].VolProfileDict.TryGetValue(kvp.Key, out priceLevel)) //added 10.01.2022
+								{
+									volProfile[barsAgo].SessionVol += kvp.Value.PriceVol;
+									volProfile[barsAgo].VolProfileDict[kvp.Key].PriceVol += kvp.Value.PriceVol;
+									volProfile[barsAgo].VolProfileDict[kvp.Key].AskVol += kvp.Value.AskVol;
+									volProfile[barsAgo].VolProfileDict[kvp.Key].BidVol += kvp.Value.BidVol;
+								}
+							}
+						}
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		#endregion
+
+		#region Get
+
+		private double GetDelta(ConcurrentDictionary<double, PriceLevel> dict)
+		{
+			double askSum = 0.0;
+			double bidSum = 0.0;
+
+			if (dict != null && !dict.IsEmpty)
+			{
+				foreach (System.Collections.Generic.KeyValuePair<double, PriceLevel> rd in dict)
+				{
+					askSum += rd.Value.AskVol;
+					bidSum += rd.Value.BidVol;
+				}
+			}
+
+			return askSum - bidSum;
+		}
+
+		private double GetVolume(ConcurrentDictionary<double, PriceLevel> dict, double key)
+		{
+			double tv = 0.0;
+
+			try
+			{
+				key = key.RoundToTickSize(Instruments);
+
+				if (dict.ContainsKey(key))
+				{
+					tv = dict[key].PriceVol;
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+
+			return tv;
+		}
+
+		private double GetAskImbalanceRatio(ConcurrentDictionary<double, PriceLevel> dict, double key)
+		{
+			double volRatio = 0.0;
+			double askPrice = key; // key);
+			double bidPrice = key - tickSizeValue; // key - tickSizeValue);
+
+			if (!dict.ContainsKey(askPrice) || !dict.ContainsKey(bidPrice))
+			{
+				return volRatio;
+			}
+
+			double askVolume = dict[askPrice].AskVol;
+			double bidVolume = dict[bidPrice].BidVol;
+
+			if (askVolume > bidVolume && askVolume /*- bidVolume*/ >= ImbalanceMinVol)
+			{
+				volRatio = askVolume / bidVolume;
+			}
+
+			return volRatio;
+		}
+
+		private double GetBidImbalanceRatio(ConcurrentDictionary<double, PriceLevel> dict, double key)
+		{
+			double volRatio = 0.0;
+			double askPrice = key + tickSizeValue; // key + tickSizeValue);
+			double bidPrice = key; // key);
+
+			if (!dict.ContainsKey(askPrice) || !dict.ContainsKey(bidPrice))
+			{
+				return volRatio;
+			}
+
+			double askVolume = dict[askPrice].AskVol;
+			double bidVolume = dict[bidPrice].BidVol;
+
+			if (bidVolume > askVolume && bidVolume /*- askVolume*/ >= ImbalanceMinVol)
+			{
+				volRatio = bidVolume / askVolume;
+			}
+
+			return volRatio;
+		}
+
+		private double GetPocPrice(ConcurrentDictionary<double, PriceLevel> dict)
+		{
+			double poc = 0.0;
+
+			if (!dict.IsEmpty)
+			{
+				poc = dict.Keys.Aggregate((i, j) => dict[i].PriceVol > dict[j].PriceVol ? i : j);
+			}
+
+			return poc;
+		}
+
+		private double[] GetValueArea(ConcurrentDictionary<double, PriceLevel> dict, double sessionVol, double pocPrice)
+		{
+			double vah = 0.0;
+			double val = 0.0;
+			double[] ret = { vah, val };
+
+			try
+			{
+				if (dict != null && !dict.IsEmpty)
+				{
+					int iteCnt = 0;
+					double maxPrc = dict.Keys.Max();
+					double minPrc = dict.Keys.Min();
+					double maxVol = sessionVol * vpVaPercentage;
+					double upperP = pocPrice + tickSizeValue;
+					double lowerP = pocPrice - tickSizeValue;
+					double volTmp = GetVolume(dict, pocPrice);
+
+					while (volTmp < maxVol)
+					{
+						if (upperP == maxPrc && lowerP == minPrc || iteCnt >= 500)
+						{
+							break;
+						}
+
+						double upperV = GetVolume(dict, upperP) + GetVolume(dict, upperP + tickSizeValue);
+						double lowerV = GetVolume(dict, lowerP) + GetVolume(dict, lowerP - tickSizeValue);
+
+						if (upperV > lowerV)
+						{
+							vah = (upperP + tickSizeValue).RoundToTickSize(Instruments);
+							upperP = (vah + tickSizeValue).RoundToTickSize(Instruments);
+							volTmp += upperV;
+						}
+						else
+						{
+							val =  (lowerP - tickSizeValue).RoundToTickSize(Instruments);
+							lowerP =  (val - tickSizeValue).RoundToTickSize(Instruments);
+							volTmp += lowerV;
+						}
+
+						iteCnt++;
+					}
+
+					ret[0] = Math.Min(maxPrc, Math.Max(upperP, vah)); //23.Feb.2022 ret[0] = Math.Min(maxPrc, vah);
+					ret[1] = Math.Max(minPrc, Math.Min(lowerP, val));   //23.Feb.2022 ret[1] = Math.Max(minPrc, val);
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+
+			return ret;
+		}
+
+		#endregion
+
+		#region Set
+
+		private void SetClassLevelVariables()
+		{
+			if (Bars.IsTickReplay)
+			{
+				DrawingTools.Draw.TextFixed(this, "TickReplay", "Please disable Tick Replay to use this Indicator!", TextPosition.TopRight);
+			}
+			if (ChartControl != null)
+			{
+				ChartBackgroundColor = ChartControl.Properties.ChartBackground;
+			}
+
+			Calculate = Calculate.OnEachTick;
+			//bool
+			showLabel = ShowLabel;
+			setChartProperties = true;
+			//int
+			ZOrder = ZAxis;
+			//double
+			imbalanceFactor = Math.Max(0.01, ImbalanceFactor / 100.0);
+			vpVaPercentage = Math.Max(0.01, VpVaPercentage / 100.0);
+			nextClosestHigherBidImbalancePrice = double.MaxValue;
+			nextClosestLowerAskImbalancePrice = double.MinValue;
+			//float
+			barSpacing = 70f;
+			fontOffset = 0f;
+			statisticCellHeight = StatisticCellHeight;
+			//misc
+			sf = new SimpleFont("Consolas", VpTextSize);
+			gtf = new GlyphTypeface();
+			barABVList = new List<ABV>();
+			barValuesDict = new Dictionary<int, BarValues>();
+			curBarBidAskVol = new TreeDictionary<double, AskBidVolume>();
+			statisticDict = new TreeDictionary<int, Statistic>();
+			curStackedImbDict = new TreeDictionary<double, StackedImbalances>();
+			barStackedImbList = new List<StackedImbalances>();
+			brokenStackedImbList = new List<StackedImbalances>();
+			footPrintBarTextFormat = null;
+			statisticTextFormat = null;
+			separatorTextLayout = null;
+
+			SidiTracing.Print(IsTracingMode, className, "All start variables are set");
+		}
+
+		private void SetValues(int barsAgo)
+		{
+			try
+			{
+				if (IsFirstTickOfBar)
+				{
+					int barIdx = CurrentBars[0] - barsAgo;
+					//store curBarBidAskVol
+					if (curBarBidAskVol.Count > 0)
+					{
+						foreach (C5.KeyValuePair<double, AskBidVolume> kvp in curBarBidAskVol)
+						{
+							ABV tmp = new ABV
+							{
+								Idx = barIdx,
+								Price = kvp.Key,
+								AskVol = kvp.Value.AskVol,
+								BidVol = kvp.Value.BidVol,
+								PriceVol = kvp.Value.PriceVol,
+								PriceDelta = kvp.Value.PriceDelta,
+								IsAskImb = kvp.Value.IsAskImb,
+								IsBidImb = kvp.Value.IsBidImb
+							};
+							//add each price to list
+							if (!isLastHistoricalBarProcessed)
+							{
+								barABVList.Add(tmp);
+							}
+						}
+
+						BarValues barValues = new BarValues() { CurBarStringLengthMax = curBarStringLengthMax + "x", AskVolMax = curBarAskVolMax, BidVolMax = curBarBidVolMax, TotalBarVol = curBarVolTotal, PocPrice = curBarPocPrice, PocVol = curBarPocVol };
+
+						if (!isLastHistoricalBarProcessed)
+						{
+							if (barValuesDict.ContainsKey(barIdx))
+							{
+								barValuesDict[barIdx] = barValues;
+							}
+							else
+							{
+								barValuesDict.Add(barIdx, barValues);
+							}
+						}
+
+						CalculateVolumeProfile(barsAgo);
+					}
+					//store curBarStackedImb
+					if (StackedImbalanceVisibilityMode != StackedImbalanceVisibilityMode.Off && curStackedImbDict.Count > 0)
+					{
+						foreach (C5.KeyValuePair<double, StackedImbalances> kvp in curStackedImbDict)
+						{
+							StackedImbalances tmp = new StackedImbalances
+							{
+								StartBarIdx = barIdx,
+								EndBarIdx = -1, //is not set until the level is broken.
+								IsAskImbalance = kvp.Value.IsAskImbalance,
+								HighestPrice = kvp.Value.HighestPrice,
+								LowestPrice = kvp.Value.LowestPrice,
+							};
+							//add each stacked imbalance to dict
+							if (!isLastHistoricalBarProcessed)
+							{
+								barStackedImbList.Add(tmp);
+							}
+						}
+
+						SetNextClosestStackedImbalancePrice();
+					}
+					//reset values
+					if (BarsArray[0].IsFirstBarOfSession)
+					{
+						ResetValues(false);
+					}
+				}
+
+				if (State == State.Realtime)
+				{
+					CalculateVolumeProfile(barsAgo);
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void SetTransitionValues()
+		{
+			transCurBarStringLengthMax = curBarStringLengthMax;
+			transCurBarVolTotal = curBarVolTotal;
+			transCurBarDelta = curBarDelta;
+			transBidAskVol = curBarBidAskVol;
+			transCurBarPriceVolMax = curBarPocVol;
+			transCurBarPocPrice = curBarPocPrice;
+			transcurBarAskVolMax = curBarAskVolMax;
+			transcurBarBidVolMax = curBarBidVolMax;
+			isLastHistoricalBarProcessed = true;
+		}
+
+		private void SetNextClosestStackedImbalancePrice()
+		{
+			if (barStackedImbList == null || barStackedImbList.Count < 1)
+			{
+				return;
+			}
+
+			try
+			{
+				//next higher bid imbalance price
+				nextClosestHigherBidImbalancePrice = barStackedImbList.Exists(x => !x.IsAskImbalance)
+					? barStackedImbList.Where(x => !x.IsAskImbalance).Min(x => x.HighestPrice)
+					: double.MaxValue;
+				//next lower ask imbalance price
+				nextClosestLowerAskImbalancePrice = barStackedImbList.Exists(x => x.IsAskImbalance)
+					? barStackedImbList.Where(x => x.IsAskImbalance).Max(x => x.LowestPrice)
+					: double.MinValue;
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void SetCurBarPocVolPrice(double lastPrice)
+		{
+			if (curPriceVol > curBarPocVol)
+			{
+				curBarPocVol = curPriceVol;
+				curBarPocPrice = lastPrice;
+			}
+		}
+
+		private void SetCurBarAskVolMax()
+		{
+			if (FpStyle == FootprintStyle.AskBid)
+			{
+				curBarAskVolMax = Math.Max(curBarAskVolMax, curAskVol);
+				curBarBidVolMax = Math.Max(curBarBidVolMax, curBidVol);
+			}
+			else
+			{
+				curBarAskVolMax = Math.Max(curBarAskVolMax, curAskVol - curBidVol);
+				curBarBidVolMax = Math.Max(curBarBidVolMax, curAskVol + curBidVol);
+			}
+		}
+
+		private void SetCurBarStringLengthMax()
+		{
+			if (FpStyle == FootprintStyle.AskBid)
+			{
+				string curAskVolString = curAskVol.ToString();
+				string curBidVolString = curBidVol.ToString();
+
+				if (curAskVolString.Length > curBidVolString.Length)
+				{
+					if (curAskVolString.Length > curBarStringLengthMax.Length)
+					{
+						curBarStringLengthMax = curAskVolString;
+					}
+				}
+				else
+				{
+					if (curBidVolString.Length > curBarStringLengthMax.Length)
+					{
+						curBarStringLengthMax = curBidVolString;
+					}
+				}
+			}
+			else
+			{
+				curBarStringLengthMax = curPriceDelta.ToString();
+			}
+		}
+
+		private void SetVpAreaValues(ConcurrentDictionary<double, PriceLevel> dict)
+		{
+			if (dict == null || dict.IsEmpty)
+			{
+				return;
+			}
+
+			try
+			{
+				double pocPrice = 0.0;
+				double pocVol = 0.0;
+				double maxDtaPrcLevel = 0.0;
+
+				foreach (System.Collections.Generic.KeyValuePair<double, PriceLevel> rd in dict)
+				{
+					if (dict[rd.Key].PriceVol > pocVol)
+					{
+						pocVol = dict[rd.Key].PriceVol;
+						pocPrice = rd.Key;
+					}
+
+					maxDtaPrcLevel = Math.Max(maxDtaPrcLevel, Math.Abs(dict[rd.Key].AskVol - dict[rd.Key].BidVol));
+				}
+
+				sessionPocVolume = pocVol;
+				sessionPocPrice = pocPrice;
+				sessionMaxDtaPrcLevel = maxDtaPrcLevel;
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		#endregion
+
+		#region Reset / Remove
+
+		private void ResetValues(bool isNewSession)
+		{
+			//Cumulative values(per session) would reset here
+			if (isNewSession)
+			{
+			}
+
+			if (!isLastHistoricalBarProcessed)
+			{
+				curBarStringLengthMax = string.Empty;
+				curBarVolTotal = curBarDelta = curBarPocVol = curBarPocPrice = curBarAskVolMax = curBarBidVolMax = 0;
+				curBarBidAskVol.Clear();
+			}
+			else
+			{
+				curBarStringLengthMax = transCurBarStringLengthMax;
+				curBarVolTotal = transCurBarVolTotal;
+				curBarDelta = transCurBarDelta;
+				curBarBidAskVol = transBidAskVol;
+				curBarPocVol = transCurBarPriceVolMax;
+				curBarPocPrice = transCurBarPocPrice;
+				curBarAskVolMax = transcurBarAskVolMax;
+				curBarBidVolMax = transcurBarBidVolMax;
+				isLastHistoricalBarProcessed = false;
+			}
+		}
+
+		#endregion
+
+		#region Draw
+
+		private void DrawFootprintBars(ChartControl chartControl, ChartScale chartScale)
+		{
+			if (chartControl.Properties.BarDistance <= 20)
+			{
+				return;
+			}
+
+			try
+			{
+				#region Variables
+
+				//vectors and rectangle for the candlestick bars
+				Vector2 point0 = new Vector2();
+				Vector2 point1 = new Vector2();
+				string biggestString = string.Empty;
+				bool isResizeAllowed = true;
+				bool calculateBiggestBarVolDelta = false;
+				//set overall initial volume from the current unfinished bar, and add later the hisotical bar volume
+				//this is used for opacity calculation from the statistic volume/delta per bar
+				double biggestBarVolume = 0.0;
+				double biggestBarDelta = 0.0;
+
+				int maxLoadedDaysIdx = Math.Max(ChartBars.FromIndex, ChartBars.GetBarIdxByTime(chartControl, startDate)); //13.Jan.2022
+				int startIdx = 0;
+
+				#endregion
+
+				#region Calculate biggest Bar Volume and Delta / resize Textformat
+
+				if (ShowStatistic && (ShowStatisticVolume || ShowStatisticDelta))
+				{
+					switch (StatisticCellColorScale)
+					{
+						case CellColorScale.Chart:
+							startIdx = maxLoadedDaysIdx; //ChartBars.FromIndex;
+							calculateBiggestBarVolDelta = true;
+							break;
+						case CellColorScale.IntradaySession:
+							startIdx = sessionStartBarIdx;
+							calculateBiggestBarVolDelta = true;
+							break;
+						case CellColorScale.All:
+							startIdx = maxLoadedDaysIdx; // ChartBars.FromIndex;
+							foreach (Statistic item in statisticDict.Values)
+							{
+								if (ShowStatisticVolume)
+								{
+									biggestBarVolume = Math.Max(biggestBarVolume, item.Volume);
+								}
+								if (ShowStatisticDelta)
+								{
+									biggestBarDelta = Math.Max(biggestBarDelta, Math.Abs(item.Delta));
+								}
+							}
+							break;
+					}
+					//resize TextFormat
+					if (barSpacing != chartControl.Properties.BarDistance || barWidth != chartControl.BarWidth)
+					{
+						int biggestBarVolumeLength = biggestBarVolume.ToString().Length;
+						int biggestBarDeltaLength = biggestBarDelta.ToString().Length;
+						string text = biggestBarVolumeLength >= biggestBarDeltaLength ? biggestBarVolume.ToString() : biggestBarDelta.ToString();
+						text = text.Length > "Volume".Length ? text : "Volume";
+
+						SidiRender.DisposeTextFormat(ref statisticTextFormat);
+						statisticTextFormat = SidiRender.GetAdjustedTextFormat(chartControl, statisticTextFormat, StatisticFont, text, chartControl.Properties.BarDistance, (float)Math.Min(StatisticFont.Size, StatisticCellHeight), 1, false);
+					}
+				}
+				//find longest visible string for resizing
+				for (int chartBarIndex = maxLoadedDaysIdx; chartBarIndex <= ChartBars.ToIndex; chartBarIndex++)
+				{
+					//find longest visible string for resizing
+					if (barValuesDict.ContainsKey(chartBarIndex) && biggestString.Length < barValuesDict[chartBarIndex].CurBarStringLengthMax.Length)
+					{
+						biggestString = barValuesDict[chartBarIndex].CurBarStringLengthMax;
+					}
+				}
+				//find biggest bar volume/delta
+				for (int chartBarIndex = startIdx; chartBarIndex <= ChartBars.ToIndex; chartBarIndex++)
+				{
+					//find biggest bar volume/delta
+					if (calculateBiggestBarVolDelta)
+					{
+						if (ShowStatisticVolume && statisticDict.Contains(chartBarIndex))
+						{
+							biggestBarVolume = Math.Max(biggestBarVolume, statisticDict[chartBarIndex].Volume);
+						}
+						if (ShowStatisticDelta && statisticDict.Contains(chartBarIndex))
+						{
+							biggestBarDelta = Math.Max(biggestBarDelta, Math.Abs(statisticDict[chartBarIndex].Delta));
+						}
+					}
+				}
+
+				#endregion
+
+				#region Draw Footprint
+
+				for (int chartBarIndex = maxLoadedDaysIdx; chartBarIndex <= ChartBars.ToIndex; chartBarIndex++)
+				{
+					#region Decleare Variables
+
+					//current bar lastPrices
+					double barClosePrice = ChartBars.Bars.GetClose(chartBarIndex);
+					double barOpenPrice = ChartBars.Bars.GetOpen(chartBarIndex);
+					double barHighPrice = ChartBars.Bars.GetHigh(chartBarIndex);
+					double barLowPrice = ChartBars.Bars.GetLow(chartBarIndex);
+					//current bar X and Y points
+					float barX = chartControl.GetXByBarIndex(ChartBars, chartBarIndex);
+					float barXLeft = barX - (float)chartControl.BarWidth;
+					float barOpenY = chartScale.GetYByValue(barOpenPrice);
+					float barCloseY = chartScale.GetYByValue(barClosePrice);
+					float barHighY = chartScale.GetYByValue(barHighPrice);
+					float barLowY = chartScale.GetYByValue(barLowPrice);
+					float columnWidth = chartControl.GetXByBarIndex(ChartBars, chartBarIndex + 1) - chartControl.GetXByBarIndex(ChartBars, chartBarIndex);
+					//histogramm
+					float histoLeftX = barXLeft + (float)(chartControl.BarWidth * 2) + 2;
+					float histoRightX = histoLeftX + columnWidth - (float)(chartControl.BarWidth * 2) - 5;
+					histoWidthMax = histoRightX - histoLeftX;
+					float histoWidthHalf = histoWidthMax / 2;
+					float histoMiddleX = histoLeftX + (histoWidthMax / 2);
+					//get the ABV list for this chart bar
+					IEnumerable<ABV> curBAVList = barABVList.Where(p => p.Idx == chartBarIndex);
+
+					double pocPrice = 0.0;
+
+					#endregion
+
+					if (histoWidthHalf < 1)
+					{
+						return;
+					}
+
+					#region Resize TextFormat/TextLayout
+
+					//runs only once per render
+					if (isResizeAllowed && (barSpacing != chartControl.Properties.BarDistance || barWidth != chartControl.BarWidth || priorTickSizeInPixel != tickSizeInPixel))
+					{
+						footPrintBarTextFormat = SidiRender.GetAdjustedTextFormat(chartControl, footPrintBarTextFormat, FootprintFont, biggestString, histoWidthHalf - (sepOffset * 2f), tickSizeInPixel, 1, false);
+						//create textlyout only for measure fontoffset, so we can render our string in middle of lastprice
+						if (footPrintBarTextFormat != null)
+						{
+							TextLayout textLayout = new TextLayout(Globals.DirectWriteFactory, biggestString, footPrintBarTextFormat, histoWidthHalf, footPrintBarTextFormat.FontSize);
+							fontOffset = textLayout.Metrics.Height / 2f;
+							SidiRender.DisposeTextLayout(ref textLayout);
+
+							#region create textlyout for footprint separator
+
+							if (separatorTextLayout != null)
+							{
+								switch (FpBarSeparatorStyle)
+								{
+									case FootprintBarSeparatorStyle.l:
+										SidiRender.DisposeTextLayout(ref separatorTextLayout);
+										separatorTextLayout = new TextLayout(Globals.DirectWriteFactory, "I", footPrintBarTextFormat, 10, footPrintBarTextFormat.FontSize);
+										break;
+
+									case FootprintBarSeparatorStyle.o:
+										SidiRender.DisposeTextLayout(ref separatorTextLayout);
+										separatorTextLayout = new TextLayout(Globals.DirectWriteFactory, "o", footPrintBarTextFormat, 10, footPrintBarTextFormat.FontSize);
+										break;
+
+									case FootprintBarSeparatorStyle.x:
+										SidiRender.DisposeTextLayout(ref separatorTextLayout);
+										separatorTextLayout = new TextLayout(Globals.DirectWriteFactory, "x", footPrintBarTextFormat, 10, footPrintBarTextFormat.FontSize);
+										break;
+								}
+
+								sepOffset = separatorTextLayout.Metrics.Width / 2f;
+							}
+
+							#endregion
+
+							footPrintBarTextFormat.WordWrapping = WordWrapping.NoWrap;
+							footPrintBarTextFormat.ParagraphAlignment = ParagraphAlignment.Near;
+						}
+
+						isResizeAllowed = false;
+					}
+
+					#endregion
+
+					#region Footprint Bars
+
+					//Historical Bars
+					if (chartBarIndex != ChartBars.Count - 1 && barValuesDict.ContainsKey(chartBarIndex))
+					{
+						pocPrice = barValuesDict[chartBarIndex].PocPrice;
+						//render
+						if (curBAVList.Count() > 0)
+						{
+							foreach (ABV t in curBAVList)
+							{
+								//y value of where our drawing will start minus our offset
+								float yRect = chartScale.GetYByValue(t.Price) - (tickSizeInPixel / 2f);
+								float yText = chartScale.GetYByValue(t.Price) - fontOffset;
+
+								#region set color and opacity based on the volume direction
+
+								string colorString = t.AskVol < t.BidVol ? "FpNegativeDeltaColor" : t.AskVol > t.BidVol ? "FpPositiveDeltaColor" : "StatisticNeutralColor";
+
+								#region determine the bar opacity on max volume
+
+								double curr_opacity = Math.Max(t.PriceVol / barValuesDict[chartBarIndex].PocVol * 100 * 0.8, 10);
+
+								#endregion
+
+								#endregion
+
+								#region render bar rectangle
+
+								//set opacity
+								if (FpColorMode == ColorMode.Saturation)
+								{
+									SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, colorString, (float)curr_opacity);
+								}
+								//render footprint
+								switch (FpClusterStyle)
+								{
+									case FootprintClusterStyle.Brick:
+
+										SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, yRect, histoWidthMax, tickSizeInPixel), colorString, RenderTarget);
+
+										break;
+
+									case FootprintClusterStyle.VolumeBar:
+
+										double ratioAsk = 0;
+										double ratioBid = 0;
+
+										if (barValuesDict[chartBarIndex].AskVolMax != 0)
+										{
+											ratioAsk = 1f - (t.AskVol / barValuesDict[chartBarIndex].AskVolMax);
+										}
+										if (barValuesDict[chartBarIndex].BidVolMax != 0)
+										{
+											ratioBid = 1f - (t.BidVol / barValuesDict[chartBarIndex].BidVolMax);
+										}
+										// determine the width of the rectangle based on the bid/ask volume
+										double width = histoWidthHalf - (histoWidthHalf * ratioBid) + (histoWidthHalf - (histoWidthHalf * ratioAsk));
+
+										SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX + (float)(histoWidthHalf * ratioBid), yRect, (float)width, tickSizeInPixel), colorString, RenderTarget);
+
+										break;
+
+									case FootprintClusterStyle.VolumeProfile:
+
+										double bidAskVol = t.AskVol + t.BidVol;
+										double ratio = bidAskVol / barValuesDict[chartBarIndex].PocVol;
+										float width0 = histoWidthMax * (float)ratio;
+
+										SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, yRect, width0, tickSizeInPixel), colorString, RenderTarget);
+
+										break;
+								}
+
+								#endregion
+
+								#region render bar string
+
+								if (footPrintBarTextFormat != null && footPrintBarTextFormat.FontSize > 6)
+								{
+									// create the bid/ask or volume/delta strings to show on the chart
+									string askStr = FpStyle == FootprintStyle.AskBid ? t.AskVol.ToString() : t.PriceDelta.ToString();
+									string bidStr = FpStyle == FootprintStyle.AskBid ? t.BidVol.ToString() : string.Empty;//t.PriceVol.ToString();
+									float x = FpStyle == FootprintStyle.AskBid ? histoMiddleX + sepOffset : histoLeftX;
+									float width = FpStyle == FootprintStyle.AskBid ? histoWidthHalf - sepOffset : histoWidthMax;
+									footPrintBarTextFormat.TextAlignment = FpStyle == FootprintStyle.AskBid ? SharpDX.DirectWrite.TextAlignment.Leading : SharpDX.DirectWrite.TextAlignment.Center;
+									// draw the ask footprint bar string
+									string brushName = ShowImbalance && FpStyle == FootprintStyle.AskBid && t.IsAskImb ? "AskImbalanceColor" : "FpBarTextColor";
+									SidiRender.DrawText(ref dxmBrushes, askStr, footPrintBarTextFormat, new RectangleF(x, yText, width, tickSizeInPixel), brushName, RenderTarget);
+									// draw the bid footprint bar string
+									if (FpStyle == FootprintStyle.AskBid)
+									{
+										footPrintBarTextFormat.TextAlignment = SharpDX.DirectWrite.TextAlignment.Trailing;
+										string brushName1 = ShowImbalance && t.IsBidImb ? "BidImbalanceColor" : "FpBarTextColor";
+										SidiRender.DrawText(ref dxmBrushes, bidStr, footPrintBarTextFormat, new RectangleF(histoMiddleX - histoWidthHalf, yText, histoWidthHalf - sepOffset, tickSizeInPixel), brushName1, RenderTarget);
+									}
+								}
+
+								#endregion
+
+								#region render separator
+
+								if (footPrintBarTextFormat != null && footPrintBarTextFormat.FontSize > 6 && FpBarSeparatorStyle != FootprintBarSeparatorStyle.None && FpStyle == FootprintStyle.AskBid)
+								{
+									if (FpBarSeparatorStyle == FootprintBarSeparatorStyle.Line)
+									{
+										//create a point to draw a vertical line in the footprint bar
+										point0.X = histoMiddleX;
+										point0.Y = barHighY;
+										point1.X = histoMiddleX;
+										point1.Y = barLowY;
+										//draw the line separator
+										SidiRender.DrawLine(ref dxmBrushes, point0, point1, "FpBarSeparatorColor", ChartBars.Properties.ChartStyle.Stroke2.Width, RenderTarget);
+									}
+									else
+									{
+										point0.X = histoMiddleX - (separatorTextLayout.Metrics.Width / 2);
+										point0.Y = yText;
+										//bar close price, colorize separator
+										string brushName = t.Price == barClosePrice && FpClosePriceStyle == ClosePriceStyle.ColorizeSeparator ? "FpClosePriceColor" : "FpBarSeparatorColor";
+										SidiRender.DrawTextLayout(ref dxmBrushes, point0, separatorTextLayout, brushName, RenderTarget);
+									}
+								}
+
+								#endregion
+							}
+						}
+					}
+					//Actual unfinished Bar
+					else
+					{
+						pocPrice = curBarPocPrice;
+						//render
+						if (curBarBidAskVol.Count > 0)
+						{
+							foreach (C5.KeyValuePair<double, AskBidVolume> kvp in curBarBidAskVol)
+							{
+								//y value of where our drawing will start minus our offset
+								float yRect = chartScale.GetYByValue(kvp.Key) - (tickSizeInPixel / 2f);
+								float yText = chartScale.GetYByValue(kvp.Key) - fontOffset;
+
+								#region set color and opacity based on the volume direction
+
+								string colorString = kvp.Value.AskVol < kvp.Value.BidVol ? "FpNegativeDeltaColor" : kvp.Value.AskVol > kvp.Value.BidVol ? "FpPositiveDeltaColor" : "StatisticNeutralColor";
+
+								#region determine the bar opacity on max volume
+
+								double curr_opacity = Math.Max(kvp.Value.PriceVol / curBarPocVol * 100 * 0.8, 10);
+
+								#endregion
+
+								#endregion
+
+								#region render bar rectangle
+
+								//set opacity
+								if (FpColorMode == ColorMode.Saturation)
+								{
+									SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, colorString, (float)curr_opacity);
+								}
+								//render footprint
+								switch (FpClusterStyle)
+								{
+									case FootprintClusterStyle.Brick:
+
+										SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, yRect, histoWidthMax, tickSizeInPixel), colorString, RenderTarget);
+
+										break;
+
+									case FootprintClusterStyle.VolumeBar:
+
+										double ratioAsk = 0;
+										double ratioBid = 0;
+
+										if (curBarAskVolMax != 0)
+										{
+											ratioAsk = 1f - (kvp.Value.AskVol / curBarAskVolMax);
+										}
+										if (curBarBidVolMax != 0)
+										{
+											ratioBid = 1f - (kvp.Value.BidVol / curBarBidVolMax);
+										}
+										// determine the width of the rectangle based on the bid/ask volume
+										double width = histoWidthHalf - (histoWidthHalf * ratioBid) + (histoWidthHalf - (histoWidthHalf * ratioAsk));
+										SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX + (float)(histoWidthHalf * ratioBid), yRect, (float)width, tickSizeInPixel), colorString, RenderTarget);
+
+										break;
+
+									case FootprintClusterStyle.VolumeProfile:
+
+										double bidAskVol = kvp.Value.AskVol + kvp.Value.BidVol;
+										double ratio = bidAskVol / curBarPocVol;
+										float width0 = histoWidthMax * (float)ratio;
+										SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, yRect, width0, tickSizeInPixel), colorString, RenderTarget);
+
+										break;
+								}
+
+								#endregion
+
+								#region render bar string
+
+								if (footPrintBarTextFormat != null && footPrintBarTextFormat.FontSize > 6)
+								{
+									// create the bid/ask or volume/delta strings to show on the chart
+									string askStr = FpStyle == FootprintStyle.AskBid ? kvp.Value.AskVol.ToString() : kvp.Value.PriceDelta.ToString();
+									string bidStr = FpStyle == FootprintStyle.AskBid ? kvp.Value.BidVol.ToString() : string.Empty; //kvp.Value.PriceVol.ToString();
+									float x = FpStyle == FootprintStyle.AskBid ? histoMiddleX + sepOffset : histoLeftX;
+									float width = FpStyle == FootprintStyle.AskBid ? histoWidthHalf - sepOffset : histoWidthMax;
+									footPrintBarTextFormat.TextAlignment = FpStyle == FootprintStyle.AskBid ? SharpDX.DirectWrite.TextAlignment.Leading : SharpDX.DirectWrite.TextAlignment.Center;
+									// draw the ask footprint bar string
+									string brushName = ShowImbalance && FpStyle == FootprintStyle.AskBid && kvp.Value.IsAskImb ? "AskImbalanceColor" : "FpBarTextColor";
+									SidiRender.DrawText(ref dxmBrushes, askStr, footPrintBarTextFormat, new RectangleF(x, yText, width, tickSizeInPixel), brushName, RenderTarget);
+									// draw the bid footprint bar string
+									if (FpStyle == FootprintStyle.AskBid)
+									{
+										footPrintBarTextFormat.TextAlignment = SharpDX.DirectWrite.TextAlignment.Trailing;
+										string brushName1 = ShowImbalance && kvp.Value.IsBidImb ? "BidImbalanceColor" : "FpBarTextColor";
+										SidiRender.DrawText(ref dxmBrushes, bidStr, footPrintBarTextFormat, new RectangleF(histoMiddleX - histoWidthHalf, yText, histoWidthHalf - sepOffset, tickSizeInPixel), brushName1, RenderTarget);
+									}
+								}
+
+								#endregion
+
+								#region render separator
+
+								if (footPrintBarTextFormat != null && footPrintBarTextFormat.FontSize > 6 && FpBarSeparatorStyle != FootprintBarSeparatorStyle.None && FpStyle == FootprintStyle.AskBid)
+								{
+									if (FpBarSeparatorStyle == FootprintBarSeparatorStyle.Line)
+									{
+										//create a point to draw a vertical line in the footprint bar
+										point0.X = histoMiddleX;
+										point0.Y = barHighY;
+										point1.X = histoMiddleX;
+										point1.Y = barLowY;
+										//draw the line separator
+										SidiRender.DrawLine(ref dxmBrushes, point0, point1, "FpBarSeparatorColor", ChartBars.Properties.ChartStyle.Stroke2.Width, RenderTarget);
+									}
+									else
+									{
+										point0.X = histoMiddleX - (separatorTextLayout.Metrics.Width / 2);
+										point0.Y = yText;
+										//bar close price, colorize separator
+										string brushName = kvp.Key == barClosePrice && FpClosePriceStyle == ClosePriceStyle.ColorizeSeparator ? "FpClosePriceColor" : "FpBarSeparatorColor";
+										SidiRender.DrawTextLayout(ref dxmBrushes, point0, separatorTextLayout, brushName, RenderTarget);
+									}
+								}
+
+								#endregion
+							}
+						}
+					}
+
+					#endregion
+
+					#region CandleStick Bars
+
+					if (FpBarBodyStyle != FootprintBarBodyStyle.None)
+					{
+						#region Body
+
+						//set the candlestick color based on open and close lastPrice
+						SharpDX.Direct2D1.Brush candleStickBrushDX = barClosePrice > barOpenPrice ? ChartBars.Properties.ChartStyle.UpBrush.ToDxBrush(RenderTarget)
+							: barClosePrice < barOpenPrice ? ChartBars.Properties.ChartStyle.DownBrush.ToDxBrush(RenderTarget)
+							: ChartBars.Properties.ChartStyle.Stroke2.Brush.ToDxBrush(RenderTarget);
+						//show footprint bar body
+						float y = Math.Min(barCloseY, barOpenY) - (tickSizeInPixel / 2);
+						float height = Math.Max(barOpenY, barCloseY) - Math.Min(barCloseY, barOpenY) + tickSizeInPixel;
+
+						RectangleF rect = new RectangleF(histoLeftX, y, histoWidthMax, height);
+						//draw the candlestick outline color, the color and width come from the main chart properties
+						RenderTarget.DrawRectangle(rect, candleStickBrushDX, 2);
+
+						#endregion
+
+						#region Wick
+
+						if (FpBarBodyStyle == FootprintBarBodyStyle.BarAndWick)
+						{
+							point0.X = histoMiddleX;
+							point1.X = histoMiddleX;
+							// high wick
+							if (barHighY < Math.Min(barOpenY, barCloseY))
+							{
+								point0.Y = barHighY;
+								point1.Y = Math.Min(barOpenY, barCloseY) - (tickSizeInPixel / 2);
+								// draw the high wick, the color and width come from the main chart properties
+								RenderTarget.DrawLine(point0, point1, candleStickBrushDX, ChartBars.Properties.ChartStyle.Stroke2.Width);
+							}
+							// low wick
+							if (barLowY > Math.Max(barOpenY, barCloseY))
+							{
+								point0.Y = barLowY;
+								point1.Y = Math.Max(barOpenY, barCloseY) + (tickSizeInPixel / 2);
+								// draw the low wick, the color and width come from the main chart properties
+								RenderTarget.DrawLine(point0, point1, candleStickBrushDX, ChartBars.Properties.ChartStyle.Stroke2.Width);
+							}
+						}
+
+						#endregion
+
+						SidiRender.DisposeBrush(ref candleStickBrushDX);
+					}
+
+					#endregion
+
+					#region POC Rectangle
+
+					if (FpPocStyle == FootprintPocStyle.Rectangle)
+					{
+						SidiRender.DrawRectangle(ref dxmBrushes, new RectangleF(histoLeftX, chartScale.GetYByValue(pocPrice) - (tickSizeInPixel / 2), histoWidthMax, tickSizeInPixel), "FpPocColor", 2, RenderTarget);
+					}
+
+					#endregion
+
+					#region Statistic Grid
+
+					//If "StatisticCellColorScale == CellColorScale.Session", only one session can be displayed at the moment, otherwise the previous session will be calculated incorrectly.
+					//For this purpose, separate calculations would have to be made for each session, which is currently not required.
+					bool canDraw = ShowStatistic && (StatisticCellColorScale == CellColorScale.IntradaySession ? chartBarIndex >= startIdx : true);
+
+					if (canDraw && statisticDict.Contains(chartBarIndex))
+					{
+						float statHeight = ShowStatisticDelta && ShowStatisticVolume ? statisticCellHeight * 2 : statisticCellHeight;
+						statisticTextFormat.WordWrapping = WordWrapping.NoWrap;
+						statisticTextFormat.ParagraphAlignment = ParagraphAlignment.Center;
+
+						if (ShowStatisticVolume)
+						{
+							statisticTextFormat.TextAlignment = SharpDX.DirectWrite.TextAlignment.Center;
+							float y = ChartPanel.H - (2 * statisticCellHeight);
+							double volume = statisticDict[chartBarIndex].Volume;
+							biggestBarVolume = Math.Max(biggestBarVolume, curBarVolTotal);
+							//percent of overall bar total volume from all visible bars
+							double curr_opacity = Math.Max(100 * (volume / biggestBarVolume), 10);
+							RectangleF rectStatVol = new RectangleF(barXLeft, y, columnWidth, statisticCellHeight);
+							//draw the statistic background in the same color as the chart background color. Prevents translucent when the statistics are transparent
+							SidiRender.FillRectangle(ref dxmBrushes, rectStatVol, "ChartBackgroundColor", RenderTarget);
+							//draw rectangle
+							SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "StatisticNeutralColor", Math.Max(1, curr_opacity));
+							SidiRender.FillRectangle(ref dxmBrushes, rectStatVol, "StatisticNeutralColor", RenderTarget);
+							//draw volume string
+							SidiRender.DrawText(ref dxmBrushes, volume.ToString(), statisticTextFormat, rectStatVol, "StatisticFontColor", RenderTarget);
+							//draw legend string
+							if (chartBarIndex == ChartBars.Count - 1)
+							{
+								statisticTextFormat.TextAlignment = SharpDX.DirectWrite.TextAlignment.Leading;
+								SidiRender.DrawText(ref dxmBrushes, " Volume", statisticTextFormat, new RectangleF(barXLeft + columnWidth, y, columnWidth, statisticCellHeight), "StatisticFontColor", RenderTarget);
+							}
+						}
+						if (ShowStatisticDelta)
+						{
+							statisticTextFormat.TextAlignment = SharpDX.DirectWrite.TextAlignment.Center;
+							float y = ChartPanel.H - statisticCellHeight;
+							double delta = statisticDict[chartBarIndex].Delta;
+							//percent of overall bar total volume from all visible bars
+							double curr_opacity = Math.Max(100 * (Math.Abs(delta) / biggestBarDelta), 10);
+							string deltaColor = delta > 0 ? "StatisticPositiveColor" : delta < 0 ? "StatisticNegativeColor" : "StatisticNeutralColor";
+							RectangleF rectStatDelta = new RectangleF(barXLeft, y, columnWidth, statisticCellHeight);
+							//draw the statistic background in the same color as the chart background color. Prevents translucent when the statistics are transparent
+							SidiRender.FillRectangle(ref dxmBrushes, rectStatDelta, "ChartBackgroundColor", RenderTarget);
+							//draw the rectangle,set the background color based on the delta number
+							SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, deltaColor, Math.Max(1, curr_opacity));
+							SidiRender.FillRectangle(ref dxmBrushes, rectStatDelta, deltaColor, RenderTarget);
+							//draw delta string
+							SidiRender.DrawText(ref dxmBrushes, delta.ToString(), statisticTextFormat, rectStatDelta, "StatisticFontColor", RenderTarget);
+							//draw legend string
+							if (chartBarIndex == ChartBars.Count - 1)
+							{
+								statisticTextFormat.TextAlignment = SharpDX.DirectWrite.TextAlignment.Leading;
+								SidiRender.DrawText(ref dxmBrushes, " Delta", statisticTextFormat, new RectangleF(barXLeft + columnWidth, y, columnWidth, statisticCellHeight), "StatisticFontColor", RenderTarget);
+							}
+						}
+					}
+
+					#endregion
+				}
+
+				#endregion
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void DrawStackedImbalance(ChartControl chartControl, ChartScale chartScale)
+		{
+			if (StackedImbalanceVisibilityMode == StackedImbalanceVisibilityMode.Off)
+			{
+				return;
+			}
+
+			try
+			{
+				//set some vars, we only want to do this once and not on every render
+				if (setChartProperties)
+				{
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "StackImbActiveAskColor", StackedImbalanceActiveOpacity);
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "StackImbActiveBidColor", StackedImbalanceActiveOpacity);
+
+					if (StackedImbalanceVisibilityMode == StackedImbalanceVisibilityMode.All)
+					{
+						SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "StackImbBrokenAskColor", StackedImbalanceBrokenOpacity);
+						SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "StackImbBrokenBidColor", StackedImbalanceBrokenOpacity);
+					}
+				}
+
+				float halfSizeInPixel = tickSizeInPixel / 2;
+
+				for (int chartBarIdx = 0; chartBarIdx <= ChartBars.ToIndex; chartBarIdx++)
+				{
+					//current bar X and Y points
+					float barX = chartControl.GetXByBarIndex(ChartBars, chartBarIdx);
+					float barXLeft = barX - (float)chartControl.BarWidth;
+					//histogramm
+					float histoLeftX = barXLeft + (float)(chartControl.BarWidth * 2) + 2;
+					float width = chartControl.CanvasRight - histoLeftX - canvasRightOffset;
+					//Historical Bars
+					if (chartBarIdx != ChartBars.Count - 1)
+					{
+						//get the StackedImbalances list for this chart bar
+						IEnumerable<StackedImbalances> curStackedImbList = barStackedImbList.Where(p => p.StartBarIdx == chartBarIdx);
+						// Unbroken Levels
+						if (curStackedImbList.Count() > 0)
+						{
+							foreach (StackedImbalances s in curStackedImbList)
+							{
+								//y value of where our drawing will start minus our offset
+								float y = chartScale.GetYByValue(s.LowestPrice) + halfSizeInPixel;
+								float height = chartScale.GetYByValue(s.HighestPrice) - y - halfSizeInPixel;
+								string colorString = s.IsAskImbalance ? "StackImbActiveAskColor" : "StackImbActiveBidColor";
+								//render
+								SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, y, width, height), colorString, RenderTarget);
+							}
+						}
+						// Broken Levels
+						if (StackedImbalanceVisibilityMode == StackedImbalanceVisibilityMode.All && chartBarIdx >= ChartBars.FromIndex)
+						{
+							IEnumerable<StackedImbalances> curBrokenStackedImbList = brokenStackedImbList.Where(p => p.StartBarIdx == chartBarIdx);
+
+							if (curBrokenStackedImbList != null && curBrokenStackedImbList.Count() > 0)
+							{
+								foreach (StackedImbalances s in curBrokenStackedImbList)
+								{
+									//y value of where our drawing will start minus our offset
+									float y = chartScale.GetYByValue(s.LowestPrice) + halfSizeInPixel;
+									float w = ChartBars.ToIndex >= s.EndBarIdx ? chartControl.GetXByBarIndex(ChartBars, s.EndBarIdx) - histoLeftX - (float)barWidth : width;
+									float h = chartScale.GetYByValue(s.HighestPrice) - y - halfSizeInPixel;
+									string colorString = s.IsAskImbalance ? "StackImbBrokenAskColor" : "StackImbBrokenBidColor";
+									//render
+									SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, y, w, h), colorString, RenderTarget);
+								}
+							}
+						}
+					}
+					//Actual unfinished Bar
+					else if (curStackedImbDict.Count > 0)
+					{
+						foreach (C5.KeyValuePair<double, StackedImbalances> kvp in curStackedImbDict)
+						{
+							//y value of where our drawing will start minus our offset
+							float y = chartScale.GetYByValue(kvp.Key) + halfSizeInPixel;
+							float height = chartScale.GetYByValue(kvp.Value.HighestPrice) - y - halfSizeInPixel;
+							string colorString = kvp.Value.IsAskImbalance ? "StackImbActiveAskColor" : "StackImbActiveBidColor";
+							//render
+							SidiRender.FillRectangle(ref dxmBrushes, new RectangleF(histoLeftX, y, width, height), colorString, RenderTarget);
+						}
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void DrawPriceMarker(ChartControl chartControl, ChartScale chartScale)
+		{
+			if (LastPriceMarkerMode == LastPriceMarkerMode.Off || LastPriceMarkerMode == LastPriceMarkerMode.RealtimeOnly && ChartBars.ToIndex != BarsArray[0].Count - 1)
+			{
+				return;
+			}
+
+			try
+			{
+				//set some vars, we only want to do this once and not on every render
+				if (setChartProperties)
+				{
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "PriceMarkerLastColor", PriceMarkerLastOpacity);
+				}
+
+				RectangleF rect = new RectangleF();
+
+				double prc = BarsArray[0].GetClose(ChartBars.ToIndex);
+				float x1 = chartControl.CanvasLeft;
+				float x2 = chartControl.CanvasRight - canvasRightOffset;
+				float y1 = ((chartScale.GetYByValue(prc) + chartScale.GetYByValue(prc + tickSizeValue)) / 2) + 1;
+				float y2 = ((chartScale.GetYByValue(prc) + chartScale.GetYByValue(prc - tickSizeValue)) / 2) - 1;
+
+				SidiRender.UpdateRectangle(ref rect, x1, y1, Math.Abs(x1 - x2), Math.Abs(y1 - y2));
+				SidiRender.DrawRectangle(ref dxmBrushes, rect, "PriceMarkerLastColor", 1, RenderTarget);
+				SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width - 1f, rect.Height - 1f);
+				SidiRender.FillRectangle(ref dxmBrushes, rect, "PriceMarkerLastColor", RenderTarget);
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void DrawVpValues(ChartControl chartControl, ChartScale chartScale)
+		{
+			if (VpMode == VolumeProfileMode.Off || VpVaMode == VolumeProfileAreaMode.Off)
+			{
+				return;
+			}
+
+			try
+			{
+				#region Init
+
+				//set some vars, we only want to do this once and not on every render
+				if (setChartProperties)
+				{
+					tfVa = new TextFormat(new Factory(), sf.Family.ToString(), SharpDX.DirectWrite.FontWeight.Bold, SharpDX.DirectWrite.FontStyle.Normal, (float)sf.Size + 2);
+
+					StrokeStyleProperties sp = new StrokeStyleProperties()
+					{
+						DashCap = CapStyle.Round,
+						DashOffset = 0.1f,
+						DashStyle = SidiRender.GetDashStyleFromNtGui(VpVpocDashStyle)
+					};
+					ssVpoc = new StrokeStyle(Globals.D2DFactory, sp);
+					sp = new StrokeStyleProperties()
+					{
+						DashCap = CapStyle.Round,
+						DashOffset = 0.1f,
+						DashStyle = SidiRender.GetDashStyleFromNtGui(VpVaDashStyle)
+					};
+					ssVa = new StrokeStyle(Globals.D2DFactory, sp);
+
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpVpocBrush", VpVpocOpacity);
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpVaBrush", VpVaOpacity);
+				}
+				//if CellColorMode is on saturation, we must set the brush here again to 100% saturation.
+				if (CellColorMode == ColorMode.Saturation)
+				{
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpVaBrush", VpVaOpacity);
+				}
+
+				#endregion
+
+				#region Variables
+
+				TextLayout tl = null;
+				VolumeProfile curVP;
+				Vector2 vec1 = new Vector2();
+				Vector2 vec2 = new Vector2();
+
+				float x1 = 0;
+
+				int startIdx = 0;
+				int startIdxVaLines = 0;
+
+				#endregion
+
+				#region Render
+
+				//select the startbar index for rendering the profile
+				switch (VpVaMode)
+				{
+					case VolumeProfileAreaMode.Off:
+						return;
+					case VolumeProfileAreaMode.All:
+						startIdx = ChartBars.FromIndex;
+						break;
+					case VolumeProfileAreaMode.IntradaySession:
+						startIdx = sessionStartBarIdx;
+						break;
+					case VolumeProfileAreaMode.RealtimeOnly:
+						startIdx = ChartBars.ToIndex;
+						break;
+					default:
+						startIdx = ChartBars.FromIndex;
+						break;
+				}
+				//select the startbar index for rendering the value area lines
+				if (VpVaMode == VolumeProfileAreaMode.RealtimeOnly)
+				{
+					switch (VpVaLineStartMode)
+					{
+						case VolumeProfileLineStartMode.Pixel:
+							startIdxVaLines = chartControl.CanvasRight - VpVaLineLength;
+							break;
+						case VolumeProfileLineStartMode.SessionBegin:
+							startIdxVaLines = Math.Max(sessionStartBarIdx, ChartBars.FromIndex);
+							break;
+						case VolumeProfileLineStartMode.ActualBar:
+							startIdxVaLines = ChartBars.ToIndex;
+							break;
+					}
+				}
+
+				for (int chartBarIndex = startIdx; chartBarIndex <= ChartBars.ToIndex; chartBarIndex++)
+				{
+					if (volProfile.IsValidDataPointAt(chartBarIndex))
+					{
+						curVP = volProfile.GetValueAt(chartBarIndex);
+					}
+					else
+					{
+						continue;
+					}
+
+					if (curVP == null || curVP.VolProfileDict.IsEmpty)
+					{
+						continue;
+					}
+
+					if (x1 == 0)
+					{
+						x1 = VpVaMode == VolumeProfileAreaMode.RealtimeOnly
+							? VpVaLineStartMode != VolumeProfileLineStartMode.Pixel ? chartControl.GetXByBarIndex(ChartBars, startIdxVaLines) : startIdxVaLines
+							: chartControl.GetXByBarIndex(ChartBars, chartBarIndex);
+					}
+
+					float x2 = chartBarIndex == ChartBars.ToIndex ? chartControl.CanvasRight - canvasRightOffset : chartControl.GetXByBarIndex(ChartBars, chartBarIndex);
+
+					double pocPrice = VpVaMode == VolumeProfileAreaMode.RealtimeOnly ? sessionPocPrice : GetPocPrice(curVP.VolProfileDict);
+					double[] vav = GetValueArea(curVP.VolProfileDict, curVP.SessionVol, pocPrice);
+					double vah = vav[0];
+					double val = vav[1];
+					//Draw Poc and VA
+					if (pocPrice > 0)
+					{
+						#region Poc
+
+						int y1 = chartScale.GetYByValue(pocPrice);
+
+						SidiRender.UpdateVector(ref vec1, x1, y1);
+						SidiRender.UpdateVector(ref vec2, x2, y1);
+						SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpVpocBrush", VpVpocThickness, ssVpoc, RenderTarget);
+						//render text only at actual bar
+						if (chartBarIndex == ChartBars.ToIndex)
+						{
+							tl = new TextLayout(Globals.DirectWriteFactory, "VPoc", tfVa, 100, 20);
+
+							SidiRender.UpdateVector(ref vec1, x1, y1 - tl.Metrics.Height);
+							SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "VpVpocBrush", RenderTarget);
+							SidiRender.DisposeTextLayout(ref tl);
+						}
+
+						#endregion
+
+						#region VaH
+
+						if (vah > 0)
+						{
+							y1 = chartScale.GetYByValue(vah);
+
+							SidiRender.UpdateVector(ref vec1, x1, y1);
+							SidiRender.UpdateVector(ref vec2, x2, y1);
+							SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpVaBrush", VpVaThickness, ssVa, RenderTarget);
+							//render text only at actual bar
+							if (chartBarIndex == ChartBars.ToIndex)
+							{
+								tl = new TextLayout(Globals.DirectWriteFactory, "VA High", tfVa, 100, 20);
+								vec1.Y = y1 - tl.Metrics.Height;
+
+								SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "VpVaBrush", RenderTarget);
+								SidiRender.DisposeTextLayout(ref tl);
+							}
+						}
+
+						#endregion
+
+						#region VaL
+
+						if (val > 0)
+						{
+							y1 = chartScale.GetYByValue(val);
+
+							SidiRender.UpdateVector(ref vec1, x1, y1);
+							SidiRender.UpdateVector(ref vec2, x2, y1);
+							SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpVaBrush", VpVaThickness, ssVa, RenderTarget);
+							//render text only at actual bar
+							if (chartBarIndex == ChartBars.ToIndex)
+							{
+								tl = new TextLayout(Globals.DirectWriteFactory, "VA Low", tfVa, 100, 20);
+								SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "VpVaBrush", RenderTarget);
+								SidiRender.DisposeTextLayout(ref tl);
+							}
+						}
+
+						#endregion
+					}
+
+					x1 = x2;
+				}
+
+				#endregion
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void DrawVpProfile(ChartControl chartControl, ChartScale chartScale, VolumeProfile curVp)
+		{
+			if (VpMode == VolumeProfileMode.Off || curVp == null || curVp.VolProfileDict.IsEmpty)
+			{
+				return;
+			}
+
+			try
+			{
+				#region init
+
+				//set some vars, we only want to do this once and not on every render
+				if (setChartProperties)
+				{
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpLastPriceCellColor", VpLastPriceCellOpacity);
+				}
+
+				#endregion
+
+				#region variables
+
+				float textColWidth = SidiRender.GetTextWidth(ChartControl, sessionPocVolume + "0", sf.Family.ToString(), (float)sf.Size);
+				float textColWidthDouble = textColWidth * 2;
+				float proWidth = textColWidth * 4;
+				float y1, y2;
+				float halfDtaLine = vpDeltaLineWidth / 2;
+				float rxDl = chartControl.CanvasRight - (vpDeltaLineWidth > 0 ? canvasRightOffset + halfDtaLine : canvasRightOffset);
+				float rxVp = rxDl - halfDtaLine;
+
+				double dtaTotal = GetDelta(curVp.VolProfileDict);
+				double prc = ChartBars.Bars.GetClose(ChartBars.ToIndex);
+				double maxPrc = curVp.VolProfileDict.Keys.Max();
+				double minPrc = curVp.VolProfileDict.Keys.Min();
+				double curPrc = 0.0;
+				double curAsk = GetCurrentAsk(1);
+				double curBid = GetCurrentBid(1);
+				double pocPrice = GetPocPrice(curVp.VolProfileDict);
+				double[] vav = GetValueArea(curVp.VolProfileDict, curVp.SessionVol, pocPrice);
+				double vah = vav[0];
+				double val = vav[1];
+
+				string dtaLineColor = dtaTotal > 0.0 ? "VpAskColor" : dtaTotal < 0.0 ? "VpBidColor" : string.Empty;
+				string brushString = string.Empty;
+
+				bool canShowBidAskTextColumn = VpMode == VolumeProfileMode.ProfileAndText && tickSizeInPixel >= 8.0f;
+
+				ChartPanel chartPanel = chartControl.ChartPanels[chartScale.PanelIndex];
+
+				RectangleF rect = new RectangleF();
+				Vector2 vec1 = new Vector2();
+				Vector2 vec2 = new Vector2();
+
+				TextLayout tl;
+				TextFormat tf;
+				SharpDX.DirectWrite.FontWeight fw;
+
+				GlyphTypeface gtf = new GlyphTypeface();
+				Typeface tFace = new Typeface(new FontFamily(sf.Family.ToString()), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+				tFace.TryGetGlyphTypeface(out gtf);
+
+				#endregion
+
+				#region volume profile
+
+				if (sessionPocVolume == 0.0)
+				{
+					return;
+				}
+
+				foreach (System.Collections.Generic.KeyValuePair<double, PriceLevel> rd in curVp.VolProfileDict)
+				{
+					curPrc =  rd.Key.RoundToTickSize(Instruments);
+
+					if (!curVp.VolProfileDict.ContainsKey(curPrc))
+					{
+						curPrc -= tickSizeValue;
+						continue;
+					}
+
+					y1 = ((chartScale.GetYByValue(curPrc) + chartScale.GetYByValue(curPrc + tickSizeValue)) / 2) + 1;
+					y2 = ((chartScale.GetYByValue(curPrc) + chartScale.GetYByValue(curPrc - tickSizeValue)) / 2) - 1;
+
+					if (canShowBidAskTextColumn)
+					{
+						#region ask - rect
+
+						SidiRender.UpdateRectangle(ref rect, rxVp - textColWidth, y1, textColWidth, Math.Abs(y1 - y2));
+						//price => poc
+						if (curPrc == sessionPocPrice)
+						{
+							SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpVpocBrush", 1, RenderTarget);
+							SidiRender.FillRectangle(ref dxmBrushes, rect, "VpVpocBrush", RenderTarget);
+						}
+						else
+						{
+							//SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpCellBrush", 100.0);
+							SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpTextCellColor", 1, RenderTarget);
+							SidiRender.FillRectangle(ref dxmBrushes, rect, "VpTextCellColor", RenderTarget);
+						}
+
+						#region moved to RenderPriceMarker() 03.Jan.2022
+
+						//price => prc
+						//if (curPrc == prc && (LastPriceMarkerMode == LastPriceMarkerMode.On || LastPriceMarkerMode == LastPriceMarkerMode.RealtimeOnly && ChartBars.ToIndex == BarsArray[0].Count - 1))
+						//{
+						//	SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpLastPriceCellColor", 1, RenderTarget);
+						//	SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width - 1f, rect.Height - 1f);
+						//	SidiRender.FillRectangle(ref dxmBrushes, rect, "VpLastPriceCellColor", RenderTarget);
+						//	SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width++, rect.Height++);
+						//}
+
+						#endregion
+
+						#endregion
+
+						#region ask - outline
+
+						if (curAsk == curPrc && curPrc == prc)
+						{
+							// top
+							SidiRender.UpdateVector(ref vec1, rect.X - 1, rect.Y);
+							SidiRender.UpdateVector(ref vec2, rect.X + rect.Width, rect.Y);
+							SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpAskColor", 100);
+							SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpAskColor", 2, RenderTarget);
+							// bottom
+							SidiRender.UpdateVector(ref vec1, rect.X - 1, rect.Y + rect.Height - 1);
+							SidiRender.UpdateVector(ref vec2, vec2.X, vec1.Y);
+							SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpAskColor", 2, RenderTarget);
+						}
+
+						#endregion
+
+						#region ask - text
+
+						fw = curPrc == sessionPocPrice ? SharpDX.DirectWrite.FontWeight.UltraBold : SharpDX.DirectWrite.FontWeight.Normal;
+						tf = new TextFormat(new Factory(), sf.Family.ToString(), fw, SharpDX.DirectWrite.FontStyle.Normal, (float)sf.Size)
+						{
+							TextAlignment = SharpDX.DirectWrite.TextAlignment.Leading
+						};
+						tl = new TextLayout(Globals.DirectWriteFactory, curVp.VolProfileDict[curPrc].AskVol.ToString(), tf, rect.Width, chartPanel.H);
+						SidiRender.DisposeTextFormat(ref tf);
+						brushString = GetAskImbalanceRatio(curVp.VolProfileDict, curPrc) >= imbalanceFactor ? "VpAskColor" : "VpTextColor";
+
+						SidiRender.UpdateVector(ref vec1, rect.X + 2, (float)(chartScale.GetYByValue(curPrc) - (VpTextSize * gtf.Baseline) + (VpTextSize * gtf.CapsHeight / 2) - 1));
+						SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, brushString, curPrc == sessionPocPrice || curAsk == curPrc && curPrc == prc ? 100 : 66);
+						SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, brushString, RenderTarget);
+						SidiRender.DisposeTextLayout(ref tl);
+
+						#endregion
+
+						#region bid - rect
+
+						SidiRender.UpdateRectangle(ref rect, rxVp - textColWidthDouble - 2, y1, textColWidth, Math.Abs(y1 - y2));
+						//price => poc
+						if (curPrc == sessionPocPrice)
+						{
+							SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpVpocBrush", 1, RenderTarget);
+							SidiRender.FillRectangle(ref dxmBrushes, rect, "VpVpocBrush", RenderTarget);
+						}
+						else
+						{
+							//SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpCellBrush", 100.0);
+							SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpTextCellColor", 1, RenderTarget);
+							SidiRender.FillRectangle(ref dxmBrushes, rect, "VpTextCellColor", RenderTarget);
+						}
+
+						#region moved to RenderPriceMarker() 03.Jan.2022
+
+						//price => prc
+						//if (curPrc == prc && (LastPriceMarkerMode == LastPriceMarkerMode.On || LastPriceMarkerMode == LastPriceMarkerMode.RealtimeOnly && ChartBars.ToIndex == BarsArray[0].Count - 1))
+						//{
+						//	SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpLastPriceCellColor", 1, RenderTarget);
+						//	SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width - 1f, rect.Height - 1f);
+						//	SidiRender.FillRectangle(ref dxmBrushes, rect, "VpLastPriceCellColor", RenderTarget);
+						//	SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width++, rect.Height++);
+						//}
+
+						#endregion
+
+						#endregion
+
+						#region bid - outline
+
+						if (curBid == curPrc && curPrc == prc)
+						{
+							//top
+							SidiRender.UpdateVector(ref vec1, rect.X - 1, rect.Y);
+							SidiRender.UpdateVector(ref vec2, rect.X + rect.Width, rect.Y);
+							SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "VpBidColor", 100);
+							SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpBidColor", 2, RenderTarget);
+							//bottom
+							SidiRender.UpdateVector(ref vec1, rect.X - 1, rect.Y + rect.Height - 1);
+							SidiRender.UpdateVector(ref vec2, rect.X + rect.Width, vec1.Y);
+							SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "VpBidColor", 2, RenderTarget);
+						}
+
+						#endregion
+
+						#region bid - text
+
+						fw = curPrc == sessionPocPrice ? SharpDX.DirectWrite.FontWeight.UltraBold : SharpDX.DirectWrite.FontWeight.Normal;
+						tf = new TextFormat(new Factory(), sf.Family.ToString(), fw, SharpDX.DirectWrite.FontStyle.Normal, (float)sf.Size)
+						{
+							TextAlignment = SharpDX.DirectWrite.TextAlignment.Trailing
+						};
+						tl = new TextLayout(Globals.DirectWriteFactory, curVp.VolProfileDict[curPrc].BidVol.ToString(), tf, rect.Width, chartPanel.H);
+						SidiRender.DisposeTextFormat(ref tf);
+						brushString = GetBidImbalanceRatio(curVp.VolProfileDict, curPrc) >= imbalanceFactor ? "VpBidColor" : "VpTextColor";
+
+						SidiRender.UpdateVector(ref vec1, rect.X - 3, (float)(chartScale.GetYByValue(curPrc) - (VpTextSize * gtf.Baseline) + (VpTextSize * gtf.CapsHeight / 2) - 1));
+						SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, brushString, curPrc == sessionPocPrice || curBid == curPrc && curPrc == prc ? 100 : 66);
+						SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, brushString, RenderTarget);
+						SidiRender.DisposeTextLayout(ref tl);
+
+						#endregion
+					}
+
+					#region profile
+
+					float width = 0.0f;
+
+					if (curVp.VolProfileDict.ContainsKey(curPrc))
+					{
+						width = (float)(proWidth / sessionPocVolume * curVp.VolProfileDict[curPrc].PriceVol);
+					}
+
+					if (width > 0.0f)
+					{
+						SidiRender.UpdateRectangle(ref rect, canShowBidAskTextColumn ? rxVp - (textColWidthDouble + 2) - (width + 2) : rxVp - width, y1, width, Math.Abs(y1 - y2));
+						//price => poc
+						if (curPrc == sessionPocPrice)
+						{
+							SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpVpocBrush", 1, RenderTarget);
+							SidiRender.FillRectangle(ref dxmBrushes, rect, "VpVpocBrush", RenderTarget);
+						}
+						else
+						{
+							double percent = SidiExtensions.GetPercentValue(proWidth, width, 10);
+							double curOpacity = CellColorMode == ColorMode.Saturation ? percent : 100;
+							string color = string.Empty;
+
+							switch (VpCellColorMode) // add 24.Feb.2022
+							{
+								case FpVpColorMode.ValueArea:
+									color = curPrc >= val && curPrc <= vah ? "VpVaBrush" : "VpCellBrush";
+									break;
+								case FpVpColorMode.Percentage:
+									color = percent > VpCellColorPerc1 && percent < VpCellColorPerc2 ? "VpCellBrushSess1Perc1" : percent > VpCellColorPerc2 ? "VpCellBrushSess1Perc2" : "VpCellBrush";
+									break;
+								case FpVpColorMode.Normal:
+									color = "VpCellBrush";
+									break;
+							}
+
+							SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, color, curOpacity);
+							SidiRender.DrawRectangle(ref dxmBrushes, rect, color, 1, RenderTarget);
+							SidiRender.FillRectangle(ref dxmBrushes, rect, color, RenderTarget);
+						}
+
+						#region moved to RenderPriceMarker() 03.Jan.2022
+
+						//price => prc
+						//if (curPrc == prc && (LastPriceMarkerMode == LastPriceMarkerMode.On || LastPriceMarkerMode == LastPriceMarkerMode.RealtimeOnly && ChartBars.ToIndex == BarsArray[0].Count - 1))
+						//{
+						//	SidiRender.DrawRectangle(ref dxmBrushes, rect, "VpLastPriceCellColor", 1, RenderTarget);
+						//	SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width - 1f, rect.Height - 1f);
+						//	SidiRender.FillRectangle(ref dxmBrushes, rect, "VpLastPriceCellColor", RenderTarget);
+						//	SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width++, rect.Height++);
+						//}
+
+						#endregion
+					}
+
+					#endregion
+
+					#region line sepparators
+
+					//horizontal line top
+					SidiRender.UpdateVector(ref vec1, rect.X - 1f, y1 - 1f);
+					SidiRender.UpdateVector(ref vec2, rxVp, y1 - 1f);
+					SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "ChartBackgroundColor", 1, RenderTarget);
+					//horizontal line bottom
+					SidiRender.UpdateVector(ref vec1, rect.X - 1f, y2 + 1f);
+					SidiRender.UpdateVector(ref vec2, rxVp, y2 + 1f);
+					SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "ChartBackgroundColor", 1, RenderTarget);
+					//profile left vertical line
+					//SidiRender.UpdateVector(ref vec1, rect.X - 1f, y1 - 1f);
+					//SidiRender.UpdateVector(ref vec2, rect.X - 1f, y2 + 1f);
+					//SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "ChartBackgroundColor", 1, RenderTarget);
+					//bid/ask volume text vertical line
+					if (canShowBidAskTextColumn)
+					{
+						//bid volume text vertical line
+						SidiRender.UpdateVector(ref vec1, rxVp - (textColWidthDouble + 3f), y1 - 1f);
+						SidiRender.UpdateVector(ref vec2, vec1.X, y2 + 1f);
+						SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "ChartBackgroundColor", 1, RenderTarget);
+						//ask volume text vertical line
+						SidiRender.UpdateVector(ref vec1, rxVp - (textColWidth + 1f), y1 - 1f);
+						SidiRender.UpdateVector(ref vec2, vec1.X, y2 + 1f);
+						SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "ChartBackgroundColor", 1, RenderTarget);
+					}
+
+					#endregion
+
+					#region delta bars
+
+					if (width > 0.0f)
+					{
+						if (curVp.VolProfileDict[curPrc].PriceVol == 0.0)
+						{
+							continue;
+						}
+
+						float askWidth = (float)(width / curVp.VolProfileDict[curPrc].PriceVol * curVp.VolProfileDict[curPrc].AskVol);
+						float bidWidth = (float)(width / curVp.VolProfileDict[curPrc].PriceVol * curVp.VolProfileDict[curPrc].BidVol);
+						float dtaWidth = Math.Abs(askWidth - bidWidth);
+
+						if (dtaWidth > 0.0f)
+						{
+							string color = askWidth > bidWidth ? "VpAskColor" : bidWidth > askWidth ? "VpBidColor" : string.Empty;
+							double curDta = Math.Abs(curVp.VolProfileDict[curPrc].AskVol - curVp.VolProfileDict[curPrc].BidVol);
+							double curOpa = VpDeltaBarsColorMode == ColorModeDeltaBars.Percentage ?
+								SidiExtensions.GetPercentValue(sessionMaxDtaPrcLevel, curDta, 10)
+								: VpDeltaBarsColorMode == ColorModeDeltaBars.Saturation ? VpDeltaBarOpacity : 100;
+
+							SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, color, curOpa);
+							SidiRender.UpdateRectangle(ref rect, canShowBidAskTextColumn ? rxVp - (textColWidthDouble + 2) - (dtaWidth + 2) : rxVp - dtaWidth, y1, rect.Width, rect.Height);
+
+							#region ask - bid
+
+							if (askWidth > bidWidth)
+							{
+								SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, dtaWidth, Math.Abs(y2 - y1));
+								SidiRender.DrawRectangle(ref dxmBrushes, rect, color, 1, RenderTarget);
+								SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width, rect.Height - 1f);
+								SidiRender.FillRectangle(ref dxmBrushes, rect, color, RenderTarget);
+							}
+
+							#endregion
+
+							#region bid - ask
+
+							else if (bidWidth > askWidth)
+							{
+								SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, Math.Abs(dtaWidth), Math.Abs(y2 - y1));
+								SidiRender.DrawRectangle(ref dxmBrushes, rect, color, 1, RenderTarget);
+								SidiRender.UpdateRectangle(ref rect, rect.X, rect.Y, rect.Width, rect.Height - 1f);
+								SidiRender.FillRectangle(ref dxmBrushes, rect, color, RenderTarget);
+							}
+
+							#endregion
+						}
+					}
+
+					#endregion
+				}
+
+				#endregion
+
+				#region  total volume/delta text top/bottom
+
+				double maxY = curVp.VolProfileDict.Keys.Max();
+				double minY = curVp.VolProfileDict.Keys.Min();
+
+				y1 = ((chartScale.GetYByValue(maxY) + chartScale.GetYByValue(maxY + tickSizeValue)) / 2) + 1;
+				y2 = ((chartScale.GetYByValue(minY) + chartScale.GetYByValue(minY - tickSizeValue)) / 2) - 1;
+
+				tf = new TextFormat(new Factory(), sf.Family.ToString(), SharpDX.DirectWrite.FontWeight.Bold, SharpDX.DirectWrite.FontStyle.Normal, (float)sf.Size)
+				{
+					TextAlignment = SharpDX.DirectWrite.TextAlignment.Leading
+				};
+
+				#region volume text top
+
+				tl = new TextLayout(Globals.DirectWriteFactory, "V: " + curVp.SessionVol.ToString("n0"), tf, chartPanel.W, chartPanel.H);
+
+				SidiRender.UpdateVector(ref vec1, rxVp - tl.Metrics.Width, (float)(y1 - VpTextSize - (VpTextSize * (1.0 - gtf.CapsHeight)) - 3f));
+				SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "VpTextColor", RenderTarget);
+
+				#endregion
+
+				#region volume text bottom
+
+				SidiRender.UpdateVector(ref vec1, vec1.X, (float)y2 + 3f);
+				SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "VpTextColor", RenderTarget);
+				SidiRender.DisposeTextLayout(ref tl);
+
+				#endregion
+
+				#region delta text top
+
+				tl = new TextLayout(Globals.DirectWriteFactory, dtaTotal.ToString("n0"), tf, chartPanel.W, chartPanel.H);
+				SidiRender.DisposeTextFormat(ref tf);
+
+				SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, dtaLineColor, 100);
+				SidiRender.UpdateVector(ref vec1, rxVp - tl.Metrics.Width, (float)(y1 - VpTextSize - (VpTextSize * (1.0 - gtf.CapsHeight)) - 3f - VpTextSize));
+				SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, dtaLineColor, RenderTarget);
+
+				#endregion
+
+				#region delta text bottom
+
+				SidiRender.UpdateVector(ref vec1, vec1.X, y2 + 3f + VpTextSize);
+				SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, dtaLineColor, RenderTarget);
+				SidiRender.DisposeTextLayout(ref tl);
+
+				#endregion
+
+				#endregion
+
+				#region delta line
+
+				if (vpDeltaLineWidth > 0)
+				{
+					SidiRender.UpdateVector(ref vec1, rxDl, y1 - 1);
+					SidiRender.UpdateVector(ref vec2, rxDl, y2);
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, dtaLineColor, VpDeltaLineColorMode == ColorMode.Saturation ? VpDeltaLineOpacity : 100);
+					//draw background color first, so that no other objects shine through
+					SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "ChartBackgroundColor", vpDeltaLineWidth, RenderTarget);
+					SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, dtaLineColor, vpDeltaLineWidth, RenderTarget);
+				}
+
+				#endregion
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void DrawBidAsk(ChartControl chartControl, ChartScale chartScale)
+		{
+			if (AskBidMarkerMode == AskBidPriceVolumeMarkerMode.Off || State != State.Realtime || ChartBars.ToIndex != BarsArray[0].Count - 1 || chartControl.Properties.BarDistance <= 20)
+			{
+				return;
+			}
+
+			try
+			{
+				#region Init
+
+				//set some vars, we only want to do this once and not on every render
+				if (setChartProperties)
+				{
+					tfLimits = new TextFormat(new Factory(), FootprintFont.Family.ToString(), SharpDX.DirectWrite.FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, 11f);
+				}
+				// store the original opacity, so we can restore after using
+				double priorBarTextColorOpacity = dxmBrushes["FpBarTextColor"].MediaBrush.Opacity * 100;
+				SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "FpBarTextColor", 66);
+
+				Vector2 vec1 = new Vector2();
+				Vector2 vec2 = new Vector2();
+				TextLayout tl = null;
+				//chartbar
+				float barX = chartControl.GetXByBarIndex(ChartBars, BarsArray[0].Count - 1);
+				float barXLeft = barX - (float)chartControl.BarWidth;
+				float columnWidth = chartControl.GetXByBarIndex(ChartBars, BarsArray[0].Count) - chartControl.GetXByBarIndex(ChartBars, BarsArray[0].Count - 1);
+				//histogram
+				float histoLeftX = barXLeft + (float)(chartControl.BarWidth * 2) + 2;
+				float histoRightX = histoLeftX + columnWidth - (float)(chartControl.BarWidth * 2) - 5;
+				//price
+				double curAsk = GetCurrentAsk(1);
+				double curBid = GetCurrentBid(1);
+
+				#endregion
+
+				#region ask
+
+				if (AskBidMarkerMode != AskBidPriceVolumeMarkerMode.AskBidPriceOnly)
+				{
+					tl = new TextLayout(Globals.DirectWriteFactory, "(" + GetCurrentAskVolume(1).ToString() + ")", tfLimits, chartPanel.W, chartPanel.H);
+
+					SidiRender.UpdateVector(ref vec1, histoRightX + 4, (float)(chartScale.GetYByValue(curAsk) - (FootprintFont.Size * gtf.Baseline) + (FootprintFont.Size * gtf.CapsHeight / 2) - 1));
+					SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "FpBarTextColor", RenderTarget);
+					SidiRender.DisposeTextLayout(ref tl);
+				}
+				if (AskBidMarkerMode != AskBidPriceVolumeMarkerMode.VolumeOnly)
+				{
+					SidiRender.UpdateVector(ref vec1, histoRightX, chartScale.GetYByValue(curAsk) - (tickSizeInPixel / 2));
+					SidiRender.UpdateVector(ref vec2, histoRightX, vec1.Y + tickSizeInPixel);
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "PriceMarkerAskColor", lastPrice >= curAsk ? 100 : 44);
+					SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "PriceMarkerAskColor", 5, RenderTarget);
+				}
+
+				#endregion
+
+				#region bid
+
+				if (AskBidMarkerMode != AskBidPriceVolumeMarkerMode.AskBidPriceOnly)
+				{
+					tl = new TextLayout(Globals.DirectWriteFactory, "(" + GetCurrentBidVolume(1).ToString() + ")", tfLimits, chartPanel.W, chartPanel.H);
+
+					SidiRender.UpdateVector(ref vec1, histoRightX + 4, (float)(chartScale.GetYByValue(curBid) - (FootprintFont.Size * gtf.Baseline) + (FootprintFont.Size * gtf.CapsHeight / 2) - 1));
+					SidiRender.DrawTextLayout(ref dxmBrushes, vec1, tl, "FpBarTextColor", RenderTarget);
+					SidiRender.DisposeTextLayout(ref tl);
+				}
+				if (AskBidMarkerMode != AskBidPriceVolumeMarkerMode.VolumeOnly)
+				{
+					SidiRender.UpdateVector(ref vec1, histoLeftX, chartScale.GetYByValue(curBid) - (tickSizeInPixel / 2));
+					SidiRender.UpdateVector(ref vec2, histoLeftX, vec1.Y + tickSizeInPixel);
+					SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "PriceMarkerBidColor", lastPrice <= curBid ? 100 : 44);
+					SidiRender.DrawLine(ref dxmBrushes, vec1, vec2, "PriceMarkerBidColor", 5, RenderTarget);
+				}
+
+				#endregion
+
+				#region restore
+
+				// set opacity back to normal
+				SidiRender.SetDxmBrushesOpacity(ref dxmBrushes, "FpBarTextColor", priorBarTextColorOpacity);
+
+				#endregion
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		#endregion
+
+		#region Misc
+
+		private void RemoveClosestStackedImbalance(int barIdx, bool isAskPrice, double priceToRemove)
+		{
+			if (barStackedImbList == null || barStackedImbList.Count < 1)
+			{
+				return;
+			}
+
+			try
+			{
+				int idx = barStackedImbList.FindIndex(r => !isAskPrice ? r.HighestPrice == priceToRemove : r.LowestPrice == priceToRemove);
+				//return if idx < 0
+				if (idx < 0)
+				{
+					return;
+				}
+				//when showing broken stacked imbalances, save level in own list.
+				if (StackedImbalanceVisibilityMode == StackedImbalanceVisibilityMode.All)
+				{
+					barStackedImbList[idx].EndBarIdx = barIdx;
+					var tmp = barStackedImbList.GetRange(idx, 1);
+					brokenStackedImbList.AddRange(tmp);
+				}
+				//remove broken stacked imbalance from our list
+				barStackedImbList.RemoveAt(idx);
+			}
+			catch (Exception ex)
+			{
+				string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+				Debug.Print(errorMsg);
+				SidiTracing.PrintException(className, errorMsg);
+				SidiTracing.Log(className, LogFilePath, errorMsg, LogLevel.Error, IsLogToLogTab, IsLogToLogFile, IsLogFileOpenOnError);
+			}
+		}
+
+		private void Dispose()
+		{
+			SidiRender.DisposeTextFormat(ref footPrintBarTextFormat);
+			SidiRender.DisposeTextFormat(ref statisticTextFormat);
+			SidiRender.DisposeTextFormat(ref tfLimits);
+			SidiRender.DisposeTextFormat(ref tfVa);
+			SidiRender.DisposeStrokeStyle(ref ssVpoc);
+			SidiRender.DisposeStrokeStyle(ref ssVa);
+		}
+
+		#endregion
+
+		#endregion
+
+		#region Properties
+
+		#region General
+
+		[XmlIgnore, ReadOnly(true)]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "General", Name = "Version", Description = "Version number")]
+		public string Version { get; private set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "General", Name = "ShowLabel", Description = "Prevent display of indicator's name at top of chart")]
+		public bool ShowLabel { get; set; }
+
+		[Range(1, int.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "General", Name = "Max. Days to load", Description = "How many day for the calculation")]
+		public int MaxLoadedDays { get; set; }
+
+		[RefreshProperties(RefreshProperties.All)]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "General", Name = "Realtime Render when Scaling", Description = "If switched on, more pc resources are needed, but the drawings are drawn without delay.\r\n\r\nAttention!!!\r\n\r\nCan be very cpu intensive, depending on what is switched on and how much data is loaded on the chart etc.")]
+		public bool IsLiveRenderingWhenScaling { get; set; }
+
+		[Range(1, 1000)]
+		[Display(ResourceType = typeof(Resource), Order = 12, GroupName = "General", Name = "Render Delay (ms)", Description = "A delay when scaling or moving the chart by these milliseconds is inserted. After that, the drawings are displayed again by the indicator.")]
+		public int RenderDelay { get; set; }
+
+		[Range(1.0, double.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 13, GroupName = "General", Name = "Bar Spacing", Description = "Sets the space between the footprint bars.")]
+		public double BarSpacing
+		{ get { return barSpacing; } set { barSpacing = (float)Math.Max(1.0, value); } }
+
+		[Range(1.0, double.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 14, GroupName = "General", Name = "Bar Width", Description = "Sets the width of the footprint bars.")]
+		public double BarWidth
+		{ get { return barWidth; } set { barWidth = Math.Max(1, value); } }
+
+		[Display(ResourceType = typeof(Resource), Order = 15, GroupName = "General", Name = "Show Candelstick Bars", Description = "Show candlestick bars.")]
+		public bool ShowCandleStickBars { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 17, GroupName = "General", Name = "Z-axis (front to back ordering)", Description = "If you want to draw your object topmost, assign to use index int.MaxValue\r\nChart Bars = 1\r\nNinjaScript Objects = 10001\r\nGlobal Draw Objects = 20001\r\nDraw  Objects = 30001")]
+		public int ZAxis { get; set; }
+
+		[Range(0.0, double.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 18, GroupName = "General", Name = "X-Offset Canvas Right", Description = "Canvas right minus offset for X-end of the drawings.")]
+		public double CanvasRightOffset
+		{ get { return canvasRightOffset; } set { canvasRightOffset = (float)value; } }
+
+		#endregion
+
+		#region Footprint Bar
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "Footprint Bar", Name = "Show Footprint Bar Outline", Description = "Off => Off\r\nBarNoWick => Shows only the bar outline whitout the wick\r\n Shows bar outline and the wick.")]
+		public FootprintBarBodyStyle FpBarBodyStyle { get; set; }
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 3, GroupName = "Footprint Bar", Name = "Style", Description = "Shows either Bid/Ask volume or Volume/Delta")]
+		public FootprintStyle FpStyle { get; set; }
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 4, GroupName = "Footprint Bar", Name = "Cluster Style", Description = "Shows either Bid/Ask volume or Volume/Delta")]
+		public FootprintClusterStyle FpClusterStyle { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 5, GroupName = "Footprint Bar", Name = "Color Mode", Description = "Shows either a volume bar or a saturation color backgroud.")]
+		public ColorMode FpColorMode { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 6, GroupName = "Footprint Bar", Name = "Separator Style", Description = "Shows selected separator (Off, I, X, O).")]
+		public FootprintBarSeparatorStyle FpBarSeparatorStyle { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 7, GroupName = "Footprint Bar", Name = "Bar Font", Description = "Font for chart bars.")]
+		public SimpleFont FootprintFont { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "Footprint Bar", Name = "Text Color", Description = "Color for text string.")]
+		public System.Windows.Media.Brush FpBarTextColor
+		{ get { return dxmBrushes["FpBarTextColor"].MediaBrush; } set { dxmBrushes["FpBarTextColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string BarTextColorSerialize
+		{ get { return Serialize.BrushToString(FpBarTextColor); } set { FpBarTextColor = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "Footprint Bar", Name = "Text Opacity (%)", Description = "Opacity 0...100%")]
+		public double FpBarTextColorOpacity { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 20, GroupName = "Footprint Bar", Name = "Separator Color", Description = "Color for text string.")]
+		public System.Windows.Media.Brush FpBarSeparatorColor
+		{ get { return dxmBrushes["FpBarSeparatorColor"].MediaBrush; } set { dxmBrushes["FpBarSeparatorColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string FpBarSeparatorColorSerialize
+		{ get { return Serialize.BrushToString(FpBarSeparatorColor); } set { FpBarSeparatorColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 30, GroupName = "Footprint Bar", Name = "Positive Delta Color", Description = "Color for positive delta bars.")]
+		public System.Windows.Media.Brush FpPositiveDeltaColor
+		{ get { return dxmBrushes["FpPositiveDeltaColor"].MediaBrush; } set { dxmBrushes["FpPositiveDeltaColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string FpPositiveDeltaColorSerialize
+		{ get { return Serialize.BrushToString(FpPositiveDeltaColor); } set { FpPositiveDeltaColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 40, GroupName = "Footprint Bar", Name = "Negative Delta Color", Description = "Color for negative delta bars.")]
+		public System.Windows.Media.Brush FpNegativeDeltaColor
+		{ get { return dxmBrushes["FpNegativeDeltaColor"].MediaBrush; } set { dxmBrushes["FpNegativeDeltaColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string FpNegativeDeltaColorSerialize
+		{ get { return Serialize.BrushToString(FpNegativeDeltaColor); } set { FpNegativeDeltaColor = Serialize.StringToBrush(value); } }
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 50, GroupName = "Footprint Bar", Name = "Close Price Style", Description = "Indicates close lastPrice off or colorize separator.")]
+		public ClosePriceStyle FpClosePriceStyle { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 51, GroupName = "Footprint Bar", Name = "Close Price Color", Description = "Color for close price.")]
+		public System.Windows.Media.Brush FpClosePriceColor
+		{ get { return dxmBrushes["FpClosePriceColor"].MediaBrush; } set { dxmBrushes["FpClosePriceColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string FpClosePriceColorSerialize
+		{ get { return Serialize.BrushToString(FpClosePriceColor); } set { FpClosePriceColor = Serialize.StringToBrush(value); } }
+
+		[Display(ResourceType = typeof(Resource), Order = 60, GroupName = "Footprint Bar", Name = "POC Style", Description = "Indicates poc volume in text or rectangle.")]
+		public FootprintPocStyle FpPocStyle { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 61, GroupName = "Footprint Bar", Name = "POC Color", Description = "Color for poc.")]
+		public System.Windows.Media.Brush FpPocColor
+		{ get { return dxmBrushes["FpPocColor"].MediaBrush; } set { dxmBrushes["FpPocColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string FpPocColorSerialize
+		{ get { return Serialize.BrushToString(FpPocColor); } set { FpPocColor = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region Imbalance
+
+		[RefreshProperties(RefreshProperties.All)]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "Imbalance", Name = "Show Imbalance", Description = "Show imbalance.")]
+		public bool ShowImbalance { get; set; }
+
+		[Range(1.0, double.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "Imbalance", Name = "Imbalance Factor %", Description = "Set the imbalance factor in %. Standart set to 300.")]
+		public double ImbalanceFactor { get; set; }
+
+		[Range(0.0, double.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 2, GroupName = "Imbalance", Name = "Min. Imbalance Volume", Description = "The imbalances are only displayed if the volume is larger than this value\r\nIt is used for the footprint bars as well as for the volume profile.")]
+		public double ImbalanceMinVol { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "Imbalance", Name = "Ask Color", Description = "Color for ask imbalance.")]
+		public System.Windows.Media.Brush AskImbalanceColor
+		{ get { return dxmBrushes["AskImbalanceColor"].MediaBrush; } set { dxmBrushes["AskImbalanceColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string AskImbalanceColorSerialize
+		{ get { return Serialize.BrushToString(AskImbalanceColor); } set { AskImbalanceColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "Imbalance", Name = "Bid Color", Description = "Color for bid imbalance.")]
+		public System.Windows.Media.Brush BidImbalanceColor
+		{ get { return dxmBrushes["BidImbalanceColor"].MediaBrush; } set { dxmBrushes["BidImbalanceColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string BidImbalanceColorSerialize
+		{ get { return Serialize.BrushToString(BidImbalanceColor); } set { BidImbalanceColor = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region Stacked Imbalances
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "Stacked Imbalances", Name = "Stacked Imbalance Visibility Mode", Description = "Select stacked imbalance mode.\r\nOff => Off\r\nAll => All imbalances (can be very high CPU intensive!)\r\nUnbrokenOnly => Only unbroken imbalances")]
+		public StackedImbalanceVisibilityMode StackedImbalanceVisibilityMode { get; set; }
+
+		[Range(2, int.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 2, GroupName = "Stacked Imbalances", Name = "Price Levels to count", Description = "How many price levels need to be counted for it to be considered a stacked imbalance.")]
+		public int PriceLevelsToCount { get; set; }
+
+		#region active levels
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "Stacked Imbalances", Name = "Active Ask Color", Description = "Color for ask imbalance.")]
+		public System.Windows.Media.Brush StackImbActiveAskColor
+		{ get { return dxmBrushes["StackImbActiveAskColor"].MediaBrush; } set { dxmBrushes["StackImbActiveAskColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StackImbActiveAskColorSerialize
+		{ get { return Serialize.BrushToString(StackImbActiveAskColor); } set { StackImbActiveAskColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "Stacked Imbalances", Name = "Active Bid Color", Description = "Color for bid imbalance.")]
+		public System.Windows.Media.Brush StackImbActiveBidColor
+		{ get { return dxmBrushes["StackImbActiveBidColor"].MediaBrush; } set { dxmBrushes["StackImbActiveBidColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StackImbActiveBidColorSerialize
+		{ get { return Serialize.BrushToString(StackImbActiveBidColor); } set { StackImbActiveBidColor = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 12, GroupName = "Stacked Imbalances", Name = "Active Levels Opacity %", Description = "What percentage (0.0...100.0) for transparency")]
+		public double StackedImbalanceActiveOpacity { get; set; }
+
+		#endregion
+
+		#region broken levels
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 20, GroupName = "Stacked Imbalances", Name = "Broken Ask Color", Description = "Color for ask imbalance.")]
+		public System.Windows.Media.Brush StackImbBrokenAskColor
+		{ get { return dxmBrushes["StackImbBrokenAskColor"].MediaBrush; } set { dxmBrushes["StackImbBrokenAskColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StackImbBrokenAskColorSerialize
+		{ get { return Serialize.BrushToString(StackImbBrokenAskColor); } set { StackImbBrokenAskColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 21, GroupName = "Stacked Imbalances", Name = "Broken Bid Color", Description = "Color for bid imbalance.")]
+		public System.Windows.Media.Brush StackImbBrokenBidColor
+		{ get { return dxmBrushes["StackImbBrokenBidColor"].MediaBrush; } set { dxmBrushes["StackImbBrokenBidColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StackImbBrokenBidColorSerialize
+		{ get { return Serialize.BrushToString(StackImbBrokenBidColor); } set { StackImbBrokenBidColor = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 22, GroupName = "Stacked Imbalances", Name = "Broken Levels Opacity %", Description = "What percentage (0.0...100.0) for transparency")]
+		public double StackedImbalanceBrokenOpacity { get; set; }
+
+		#endregion
+
+		#endregion
+
+		#region Statistic
+
+		[RefreshProperties(RefreshProperties.All)]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "Statistic", Name = "Show Statistic", Description = "")]
+		public bool ShowStatistic { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "Statistic", Name = "Show Legend", Description = "")]
+		public bool ShowStatisticLegend { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 2, GroupName = "Statistic", Name = "Show Volume", Description = "")]
+		public bool ShowStatisticVolume { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 3, GroupName = "Statistic", Name = "Show Delta", Description = "")]
+		public bool ShowStatisticDelta { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 4, GroupName = "Statistic", Name = "Cell Height (n) Pixel", Description = "Cell height for each row in pixels")]
+		public int StatisticCellHeight { get; set; }
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "Statistic", Name = "Cell Color Scale", Description = "Chart => % depends on visible cumulativ overall bar value (smoother)\r\nSession => % depends on the largest session bar total value\r\nAll => % depends on the largest visible bar total value")]
+		public CellColorScale StatisticCellColorScale { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 20, GroupName = "Statistic", Name = "Font", Description = "Font for the statistic.")]
+		public SimpleFont StatisticFont { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 21, GroupName = "Statistic", Name = "Text Color", Description = "")]
+		public System.Windows.Media.Brush StatisticFontColor
+		{ get { return dxmBrushes["StatisticFontColor"].MediaBrush; } set { dxmBrushes["StatisticFontColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StatisticFontColorSerialize
+		{ get { return Serialize.BrushToString(StatisticFontColor); } set { StatisticFontColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 50, GroupName = "Statistic", Name = "Background Neutral Color", Description = "")]
+		public System.Windows.Media.Brush StatisticNeutralColor
+		{ get { return dxmBrushes["StatisticNeutralColor"].MediaBrush; } set { dxmBrushes["StatisticNeutralColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StatisticNeutralColorSerialize
+		{ get { return Serialize.BrushToString(StatisticNeutralColor); } set { StatisticNeutralColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 51, GroupName = "Statistic", Name = "Background Positive Color", Description = "")]
+		public System.Windows.Media.Brush StatisticPositiveColor
+		{ get { return dxmBrushes["StatisticPositiveColor"].MediaBrush; } set { dxmBrushes["StatisticPositiveColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StatisticDeltaUpColorSerialize
+		{ get { return Serialize.BrushToString(StatisticPositiveColor); } set { StatisticPositiveColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 52, GroupName = "Statistic", Name = "Background Negative Color", Description = "")]
+		public System.Windows.Media.Brush StatisticNegativeColor
+		{ get { return dxmBrushes["StatisticNegativeColor"].MediaBrush; } set { dxmBrushes["StatisticNegativeColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string StatisticDeltaDownColorSerialize
+		{ get { return Serialize.BrushToString(StatisticNegativeColor); } set { StatisticNegativeColor = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region VP Profile
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "VP Profile", Name = "Profile Mode", Description = "Off => Off\r\nProfile => Volume Profile only \r\nProfileAndText => Volume Profile and Bid/Ask Volume in Text Column ")]
+		public VolumeProfileMode VpMode { get; set; }
+
+		#region Text
+
+		[Range(1, int.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "VP Profile", Name = "Text Size", Description = "")]
+		public int VpTextSize { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 2, GroupName = "VP Profile", Name = "Text Color", Description = "")]
+		public System.Windows.Media.Brush VpTextColor
+		{ get { return dxmBrushes["VpTextColor"].MediaBrush; } set { dxmBrushes["VpTextColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpTextColorSerializable
+		{ get { return Serialize.BrushToString(VpTextColor); } set { VpTextColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 3, GroupName = "VP Profile", Name = "Text Cell Color", Description = "")]
+		public System.Windows.Media.Brush VpTextCellColor
+		{ get { return dxmBrushes["VpTextCellColor"].MediaBrush; } set { dxmBrushes["VpTextCellColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpTextCellColorSerializable
+		{ get { return Serialize.BrushToString(VpTextCellColor); } set { VpTextCellColor = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region Cell
+
+		[Display(ResourceType = typeof(Resource), Order = 4, GroupName = "VP Profile", Name = "Profile Cell Color Mode", Description = "Shows either full color or a saturation color background.")]
+		public ColorMode CellColorMode { get; set; }
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter)), PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 5, GroupName = "VP Profile", Name = "Profile Cell Color Dependency Mode", Description = "Normal => Normal Mode\r\nValue Area => Depends on Value Area\r\nPercentage => Depends on the selected Percent")]
+		public FpVpColorMode VpCellColorMode { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "VP Profile", Name = "Profile Cell Color Normal", Description = "")]
+		public System.Windows.Media.Brush VpCellBrush
+		{ get { return dxmBrushes["VpCellBrush"].MediaBrush; } set { dxmBrushes["VpCellBrush"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpCellColorSerializable
+		{ get { return Serialize.BrushToString(VpCellBrush); } set { VpCellBrush = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "VP Profile", Name = "Profile Cell Color #1 (%)", Description = "What percentage (0.0...100.0) of the largest volume.")]
+		public double VpCellColorPerc1 { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 12, GroupName = "VP Profile", Name = "Profile Cell Color #1", Description = "")]
+		public System.Windows.Media.Brush VpCellBrushPerc1
+		{ get { return dxmBrushes["VpCellBrushSess1Perc1"].MediaBrush; } set { dxmBrushes["VpCellBrushSess1Perc1"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpCellColorPerc1Serializable
+		{ get { return Serialize.BrushToString(VpCellBrushPerc1); } set { VpCellBrushPerc1 = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 13, GroupName = "VP Profile", Name = "Profile Cell Color #2 (%)", Description = "What percentage (0.0...100.0) of the largest volume.")]
+		public double VpCellColorPerc2 { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 14, GroupName = "VP Profile", Name = "Profile Cell Color #2", Description = "")]
+		public System.Windows.Media.Brush VpCellBrushPerc2
+		{ get { return dxmBrushes["VpCellBrushSess1Perc2"].MediaBrush; } set { dxmBrushes["VpCellBrushSess1Perc2"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpCellColorPerc2Serializable
+		{ get { return Serialize.BrushToString(VpCellBrushPerc2); } set { VpCellBrushPerc2 = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region Delta Bars
+
+		[RefreshProperties(RefreshProperties.All)]
+		[Display(ResourceType = typeof(Resource), Order = 20, GroupName = "VP Profile", Name = "Delta Bars Color Mode", Description = "Solid => Full Color\r\nSaturation => Opacity depending on the set Percentages\r\nPercentage => Opacity depending on the highest delta Volume")]
+		public ColorModeDeltaBars VpDeltaBarsColorMode { get; set; }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 21, GroupName = "VP Profile", Name = "Delta Bar Opacity %", Description = "What percentage (0.0...100.0) for transparency\r\nTake only affect to the delta bars/line when \"Delta Bar Color Mode\" is set to \"Saturation\".")]
+		public double VpDeltaBarOpacity { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 22, GroupName = "VP Profile", Name = "Delta Bars/Line/Ask Color", Description = "Color for the delta bars/line and last traded price in statistic (if visible).")]
+		public System.Windows.Media.Brush VpAskColor
+		{ get { return dxmBrushes["VpAskColor"].MediaBrush; } set { dxmBrushes["VpAskColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpAskColorSerializable
+		{ get { return Serialize.BrushToString(VpAskColor); } set { VpAskColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 23, GroupName = "VP Profile", Name = "Delta Bars/Line/Bid Color", Description = "Color for the delta bars/line and last traded price in statistic (if visible).")]
+		public System.Windows.Media.Brush VpBidColor
+		{ get { return dxmBrushes["VpBidColor"].MediaBrush; } set { dxmBrushes["VpBidColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpBidColorSerializable
+		{ get { return Serialize.BrushToString(VpBidColor); } set { VpBidColor = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region Delta Line
+
+		[RefreshProperties(RefreshProperties.All)]
+		[Display(ResourceType = typeof(Resource), Order = 30, GroupName = "VP Profile", Name = "Delta Line Color Mode", Description = "Shows either full color or a saturation color background.")]
+		public ColorMode VpDeltaLineColorMode { get; set; }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 31, GroupName = "VP Profile", Name = "Delta Line Opacity %", Description = "What percentage (0.0...100.0) for transparency\r\nTake only affect to the delta bars/line when \"Delta Line Color Mode\" is set to \"Saturation\".")]
+		public double VpDeltaLineOpacity { get; set; }
+
+		[Range(0.0, 10.0)]
+		[Display(ResourceType = typeof(Resource), Order = 32, GroupName = "VP Profile", Name = "Delta Line Width (0...10) Pixel", Description = "Width from the bid/ask delta line right to the volume profile.\r\nIf value == 0, line is not showing!")]
+		public double VpDeltaLineWidth
+		{ get { return vpDeltaLineWidth; } set { vpDeltaLineWidth = (float)value; } }
+
+		#endregion
+
+		#region Last Price
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 40, GroupName = "VP Profile", Name = "Last Price Cell Color", Description = "")]
+		public System.Windows.Media.Brush VpLastPriceCellColor
+		{ get { return dxmBrushes["VpLastPriceCellColor"].MediaBrush; } set { dxmBrushes["VpLastPriceCellColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpLastPriceCellColorSerializable
+		{ get { return Serialize.BrushToString(VpLastPriceCellColor); } set { VpLastPriceCellColor = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 41, GroupName = "VP Profile", Name = "Last Price Cell Opacity %", Description = "What percentage (0.0...100.0) for transparency")]
+		public double VpLastPriceCellOpacity { get; set; }
+
+		#endregion
+
+		#endregion
+
+		#region VP Values
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "VP Values", Name = "Area Mode", Description = "Off => Off\r\nAll => All loaded data (can be very high cpu intensive!!!)\r\nIntraday => Only intraday (can be high cpu intensive!!!)\r\nRealtimeOnly => Only realtime")]
+		public VolumeProfileAreaMode VpVaMode { get; set; }
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "VP Values", Name = "Line Mode", Description = "ActualBar => Draw line start at actual bar\r\nSessionBegin => Draw line start at session begin\r\nPixel => Draw line start at canvas right minus (n) pixel")]
+		public VolumeProfileLineStartMode VpVaLineStartMode { get; set; }
+
+		[Range(0, int.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 2, GroupName = "VP Values", Name = "Line Length (n) pixel", Description = "")]
+		public int VpVaLineLength { get; set; }
+
+		#region VPoc
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "VP Values", Name = "VPoc Dashstyle", Description = "")]
+		public SidiDashStyle VpVpocDashStyle { get; set; }
+
+		[Range(2, int.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "VP Values", Name = "VPoc Thickness (n) pixel", Description = "")]
+		public int VpVpocThickness { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 12, GroupName = "VP Values", Name = "VPoc Color", Description = "")]
+		public System.Windows.Media.Brush VpVpocBrush
+		{ get { return dxmBrushes["VpVpocBrush"].MediaBrush; } set { dxmBrushes["VpVpocBrush"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpVpocColorSerializable
+		{ get { return Serialize.BrushToString(VpVpocBrush); } set { VpVpocBrush = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 13, GroupName = "VP Values", Name = "VPoc Opacity %", Description = "What percentage (0.0...100.0) for transparency")]
+		public double VpVpocOpacity { get; set; }
+
+		#endregion
+
+		#region VA
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 20, GroupName = "VP Values", Name = "VA High/Low %", Description = "What percentage (0.0...100.0) for transparency of the volume for the calculation of the value area high/low?")]
+		public double VpVaPercentage { get; set; }
+
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 21, GroupName = "VP Values", Name = "VA Dashstyle", Description = "")]
+		public SidiDashStyle VpVaDashStyle { get; set; }
+
+		[Range(2, int.MaxValue)]
+		[Display(ResourceType = typeof(Resource), Order = 22, GroupName = "VP Values", Name = "VA Thickness (n) pixel", Description = "")]
+		public int VpVaThickness { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 23, GroupName = "VP Values", Name = "VA Color", Description = "")]
+		public System.Windows.Media.Brush VpVaBrush
+		{ get { return dxmBrushes["VpVaBrush"].MediaBrush; } set { dxmBrushes["VpVaBrush"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string VpVaColorSerializable
+		{ get { return Serialize.BrushToString(VpVaBrush); } set { VpVaBrush = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 24, GroupName = "VP Values", Name = "VA Opacity %", Description = "What percentage (0.0...100.0) for transparency")]
+		public double VpVaOpacity { get; set; }
+
+		#endregion
+
+		#endregion
+
+		#region Price Marker
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "Price Marker", Name = "Last Price Line Mode", Description = "Off => Off\r\nOn => Always visible\r\nRealtimeOnly => Only visible if the current bar is visible")]
+		public LastPriceMarkerMode LastPriceMarkerMode { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "Price Marker", Name = "Last Price Line Color", Description = "")]
+		public System.Windows.Media.Brush PriceMarkerLastColor
+		{ get { return dxmBrushes["PriceMarkerLastColor"].MediaBrush; } set { dxmBrushes["PriceMarkerLastColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string PriceMarkerLastColorSerializable
+		{ get { return Serialize.BrushToString(PriceMarkerLastColor); } set { PriceMarkerLastColor = Serialize.StringToBrush(value); } }
+
+		[Range(0.0, 100.0)]
+		[Display(ResourceType = typeof(Resource), Order = 2, GroupName = "Price Marker", Name = "Last Price Line Color Opacity %", Description = "What percentage (0.0...100.0) for transparency")]
+		public double PriceMarkerLastOpacity { get; set; }
+
+		[RefreshProperties(RefreshProperties.All)]
+		[TypeConverter(typeof(SidiEnumDescriptionConverter))]
+		[PropertyEditor("NinjaTrader.Gui.Tools.StringStandardValuesEditorKey")]
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "Price Marker", Name = "Ask/Bid Price/Vol Marker Mode", Description = "Off => Off\r\nBoth => Ask/Bid price and volume are visible\r\nVolumeOnly=> Only ask/bid volume are visible\r\nAskBidPriceOnly => Only ask/bid price marker are visible")]
+		public AskBidPriceVolumeMarkerMode AskBidMarkerMode { get; set; }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "Price Marker", Name = "Ask Price Marker Color", Description = "")]
+		public System.Windows.Media.Brush PriceMarkerAskColor
+		{ get { return dxmBrushes["PriceMarkerAskColor"].MediaBrush; } set { dxmBrushes["PriceMarkerAskColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string PriceMarkerAskColorSerializable
+		{ get { return Serialize.BrushToString(PriceMarkerAskColor); } set { PriceMarkerAskColor = Serialize.StringToBrush(value); } }
+
+		[XmlIgnore]
+		[Display(ResourceType = typeof(Resource), Order = 12, GroupName = "Price Marker", Name = "Bid Price Marker Color", Description = "")]
+		public System.Windows.Media.Brush PriceMarkerBidColor
+		{ get { return dxmBrushes["PriceMarkerBidColor"].MediaBrush; } set { dxmBrushes["PriceMarkerBidColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string PriceMarkerBidColorSerializable
+		{ get { return Serialize.BrushToString(PriceMarkerBidColor); } set { PriceMarkerBidColor = Serialize.StringToBrush(value); } }
+
+		#endregion
+
+		#region Debug
+
+		[Display(ResourceType = typeof(Resource), Order = 0, GroupName = "Debug", Name = "IsTracingMode", Description = "Tracing mode on/off")]
+		public bool IsTracingMode { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 1, GroupName = "Debug", Name = "IsClearOutputWindow", Description = "Clear the output window at start")]
+		public bool IsClearOutputWindow { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 10, GroupName = "Debug", Name = "IsLogToLogTab", Description = "Is logging error`s to ninjatrader`s log tab on/off.")]
+		public bool IsLogToLogTab { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 11, GroupName = "Debug", Name = "IsLogToLogFile", Description = "Is logging error`s to log file on/off.")]
+		public bool IsLogToLogFile { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 12, GroupName = "Debug", Name = "LogFilePath", Description = "Storage location for logging error`s\r\nPlease use only the full path whitout filename such as: C:\\Users\\*\\Documents\\NinjaTrader 8\\log\\\r\nThe file name is automatically assigned.")]
+		public string LogFilePath { get; set; }
+
+		[Display(ResourceType = typeof(Resource), Order = 13, GroupName = "Debug", Name = "IsLogFileOpenOnError", Description = "Open the file after an error is written to the file")]
+		public bool IsLogFileOpenOnError { get; set; }
+
+		#endregion
+
+		#region Non Browsable
+
+		[Browsable(false)]
+		public DateTime TimeNow
+		{
+			get
+			{
+				if (Connection.PlaybackConnection != null)
+				{
+					timeNow = Connection.PlaybackConnection.Now;
+				}
+				else if (State.GetHashCode() >= 4 && State.GetHashCode() < 7)
+				{
+					TriggerCustomEvent(o => timeNow = Time[0], null);
+				}
+				else
+				{
+					timeNow = Globals.Now;
+				}
+
+				if (timeNow.Millisecond > 0)
+				{
+					timeNow = Globals.MinDate.AddSeconds((long)Math.Floor(timeNow.Subtract(Globals.MinDate).TotalSeconds));
+				}
+
+				return timeNow;
+			}
+		}
+
+		[XmlIgnore, Browsable(false)]
+		public System.Windows.Media.Brush ChartBackgroundColor
+		{ get { return dxmBrushes["ChartBackgroundColor"].MediaBrush; } set { dxmBrushes["ChartBackgroundColor"].MediaBrush = value; } }
+
+		[Browsable(false)]
+		public string ChartBackgroundColorSerializable
+		{ get { return Serialize.BrushToString(ChartBackgroundColor); } set { ChartBackgroundColor = Serialize.StringToBrush(value); } }
+
+		#endregion;
+
+		#endregion
+	}
+
+	namespace SidiFootprintDependencies
+	{
+		public class SidiFootprintPropertyConverter : IndicatorBaseConverter
+		{
+			private readonly string className = MethodBase.GetCurrentMethod().DeclaringType.Name;
+			private readonly SidiFootprint sidiFootprint;
+
+			public override PropertyDescriptorCollection GetProperties(ITypeDescriptorContext context, object component, Attribute[] attrs)
+			{
+				try
+				{
+					// we need the indicator instance which actually exists on the gridLineStroke
+					SidiFootprint indi = component as SidiFootprint;
+					// base.GetProperties ensures we have all the properties (and associated property gridLineStroke editors)
+					// NinjaTrader internal logic determines for a given indicator
+					PropertyDescriptorCollection pdc = base.GetPropertiesSupported(context) ? base.GetProperties(context, component, attrs) : TypeDescriptor.GetProperties(component, attrs);
+
+					if (indi == null || pdc == null)
+					{
+						return pdc;
+					}
+					//add to property descriptor list
+					List<PropertyDescriptor> pdList = new List<PropertyDescriptor>();
+
+					if (indi.IsLiveRenderingWhenScaling)
+					{
+						pdList.Add(pdc["RenderDelay"]);
+					}
+					if (!indi.ShowImbalance)
+					{
+						pdList.Add(pdc["ImbalanceFactor"]);
+						pdList.Add(pdc["ImbalanceMinVol"]);
+						pdList.Add(pdc["AskImbalanceColor"]);
+						pdList.Add(pdc["BidImbalanceColor"]);
+					}
+					if (!indi.ShowStatistic)
+					{
+						pdList.Add(pdc["ShowStatisticLegend"]);
+						pdList.Add(pdc["ShowStatisticVolume"]);
+						pdList.Add(pdc["ShowStatisticDelta"]);
+						pdList.Add(pdc["StatisticCellHeight"]);
+						pdList.Add(pdc["StatisticCellColorScale"]);
+						pdList.Add(pdc["StatisticFont"]);
+						pdList.Add(pdc["StatisticFontColor"]);
+						pdList.Add(pdc["StatisticNeutralColor"]);
+						pdList.Add(pdc["StatisticPositiveColor"]);
+						pdList.Add(pdc["StatisticNegativeColor"]);
+					}
+
+					switch (indi.StackedImbalanceVisibilityMode)
+					{
+						case StackedImbalanceVisibilityMode.Off:
+							pdList.Add(pdc["PriceLevelsToCount"]);
+							pdList.Add(pdc["StackImbActiveAskColor"]);
+							pdList.Add(pdc["StackImbActiveBidColor"]);
+							pdList.Add(pdc["StackedImbalanceActiveOpacity"]);
+							pdList.Add(pdc["StackImbBrokenAskColor"]);
+							pdList.Add(pdc["StackImbBrokenBidColor"]);
+							pdList.Add(pdc["StackedImbalanceBrokenOpacity"]);
+							break;
+						case StackedImbalanceVisibilityMode.All:
+							break;
+						case StackedImbalanceVisibilityMode.UnbrokenOnly:
+							pdList.Add(pdc["StackImbBrokenAskColor"]);
+							pdList.Add(pdc["StackImbBrokenBidColor"]);
+							pdList.Add(pdc["StackedImbalanceBrokenOpacity"]);
+							break;
+					}
+					switch (indi.VpMode)
+					{
+						case VolumeProfileMode.Off:
+							pdList.Add(pdc["VpTextSize"]);
+							pdList.Add(pdc["VpTextColor"]);
+							pdList.Add(pdc["VpTextCellColor"]);
+							pdList.Add(pdc["CellColorMode"]);
+							pdList.Add(pdc["VpCellColorMode"]);
+							pdList.Add(pdc["VpCellBrush"]);
+							pdList.Add(pdc["VpCellColorPerc1"]);
+							pdList.Add(pdc["VpCellBrushPerc1"]);
+							pdList.Add(pdc["VpCellColorPerc2"]);
+							pdList.Add(pdc["VpCellBrushPerc2"]);
+							pdList.Add(pdc["VpDeltaBarsColorMode"]);
+							pdList.Add(pdc["VpDeltaBarOpacity"]);
+							pdList.Add(pdc["VpAskColor"]);
+							pdList.Add(pdc["VpBidColor"]);
+							pdList.Add(pdc["VpDeltaLineColorMode"]);
+							pdList.Add(pdc["VpDeltaLineOpacity"]);
+							pdList.Add(pdc["VpDeltaLineWidth"]);
+							pdList.Add(pdc["VpLastPriceCellColor"]);
+							pdList.Add(pdc["VpLastPriceCellOpacity"]);
+							break;
+						case VolumeProfileMode.ProfileOnly:
+							pdList.Add(pdc["VpTextSize"]);
+							pdList.Add(pdc["VpTextColor"]);
+							pdList.Add(pdc["VpTextCellColor"]);
+							break;
+						case VolumeProfileMode.ProfileAndText:
+							break;
+					}
+					switch (indi.VpCellColorMode)
+					{
+						case FpVpColorMode.Normal:
+							pdList.Add(pdc["VpCellColorPerc1"]);
+							pdList.Add(pdc["VpCellBrushPerc1"]);
+							pdList.Add(pdc["VpCellColorPerc2"]);
+							pdList.Add(pdc["VpCellBrushPerc2"]);
+							break;
+						case FpVpColorMode.ValueArea:
+							pdList.Add(pdc["VpCellColorPerc1"]);
+							pdList.Add(pdc["VpCellBrushPerc1"]);
+							pdList.Add(pdc["VpCellColorPerc2"]);
+							pdList.Add(pdc["VpCellBrushPerc2"]);
+							break;
+						case FpVpColorMode.Percentage:
+							break;
+					}
+					switch (indi.VpVaMode)
+					{
+						case VolumeProfileAreaMode.Off:
+							pdList.Add(pdc["VpVaLineStartMode"]);
+							pdList.Add(pdc["VpVaLineLength"]);
+							pdList.Add(pdc["VpVpocDashStyle"]);
+							pdList.Add(pdc["VpVpocThickness"]);
+							pdList.Add(pdc["VpVpocBrush"]);
+							pdList.Add(pdc["VpVpocOpacity"]);
+							pdList.Add(pdc["VpVaPercentage"]);
+							pdList.Add(pdc["VpVaDashStyle"]);
+							pdList.Add(pdc["VpVaThickness"]);
+							pdList.Add(pdc["VpVaBrush"]);
+							pdList.Add(pdc["VpVaOpacity"]);
+							break;
+						case VolumeProfileAreaMode.All:
+							pdList.Add(pdc["VpVaLineStartMode"]);
+							pdList.Add(pdc["VpVaLineLength"]);
+							break;
+						case VolumeProfileAreaMode.IntradaySession:
+							pdList.Add(pdc["VpVaLineStartMode"]);
+							pdList.Add(pdc["VpVaLineLength"]);
+							break;
+						case VolumeProfileAreaMode.RealtimeOnly:
+							break;
+					}
+					switch (indi.VpDeltaBarsColorMode)
+					{
+						case ColorModeDeltaBars.Solid:
+							pdList.Add(pdc["VpDeltaBarOpacity"]);
+							break;
+						case ColorModeDeltaBars.Saturation:
+							break;
+						case ColorModeDeltaBars.Percentage:
+							pdList.Add(pdc["VpDeltaBarOpacity"]);
+							break;
+					}
+					switch (indi.VpVaLineStartMode)
+					{
+						case VolumeProfileLineStartMode.Pixel:
+							break;
+						case VolumeProfileLineStartMode.SessionBegin:
+							pdList.Add(pdc["VpVaLineLength"]);
+							break;
+						case VolumeProfileLineStartMode.ActualBar:
+							pdList.Add(pdc["VpVaLineLength"]);
+							break;
+					}
+					switch (indi.VpDeltaLineColorMode)
+					{
+						case ColorMode.Solid:
+							pdList.Add(pdc["VpDeltaLineOpacity"]);
+							break;
+						case ColorMode.Saturation:
+							break;
+					}
+					switch (indi.LastPriceMarkerMode)
+					{
+						case LastPriceMarkerMode.Off:
+							pdList.Add(pdc["PriceMarkerLastColor"]);
+							pdList.Add(pdc["PriceMarkerLastOpacity"]);
+							break;
+						case LastPriceMarkerMode.On:
+							break;
+						case LastPriceMarkerMode.RealtimeOnly:
+							break;
+					}
+					switch (indi.AskBidMarkerMode)
+					{
+						case AskBidPriceVolumeMarkerMode.Off:
+							pdList.Add(pdc["PriceMarkerAskColor"]);
+							pdList.Add(pdc["PriceMarkerBidColor"]);
+							break;
+						case AskBidPriceVolumeMarkerMode.Both:
+							break;
+						case AskBidPriceVolumeMarkerMode.VolumeOnly:
+							break;
+						case AskBidPriceVolumeMarkerMode.AskBidPriceOnly:
+							break;
+					}
+					//remove old and set new attribute
+					foreach (var item in pdList)
+					{
+						pdc.Remove(item);
+						pdc.Add(new PropertyDescriptorExtended(item, o => indi, null, new Attribute[] { new BrowsableAttribute(false) }));
+					}
+
+					return pdc;
+				}
+				catch (Exception ex)
+				{
+					string errorMsg = SidiExtensions.ExceptionInfo(ex, MethodBase.GetCurrentMethod().DeclaringType.Name, LogLevel.Error);
+					Debug.Print(errorMsg);
+					SidiTracing.PrintException(className, errorMsg);
+					SidiTracing.Log(className, sidiFootprint.LogFilePath, errorMsg, LogLevel.Error, sidiFootprint.IsLogToLogTab, sidiFootprint.IsLogToLogFile, sidiFootprint.IsLogFileOpenOnError);
+				}
+				return null;
+			}
+
+			// Important: This must return true otherwise the type convetor will not be called
+			public override bool GetPropertiesSupported(ITypeDescriptorContext context)
+			{
+				return true;
+			}
+		}
+	}
+}
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private Sidi.SidiFootprint[] cacheSidiFootprint;
+		public Sidi.SidiFootprint SidiFootprint()
+		{
+			return SidiFootprint(Input);
+		}
+
+		public Sidi.SidiFootprint SidiFootprint(ISeries<double> input)
+		{
+			if (cacheSidiFootprint != null)
+				for (int idx = 0; idx < cacheSidiFootprint.Length; idx++)
+					if (cacheSidiFootprint[idx] != null &&  cacheSidiFootprint[idx].EqualsInput(input))
+						return cacheSidiFootprint[idx];
+			return CacheIndicator<Sidi.SidiFootprint>(new Sidi.SidiFootprint(), input, ref cacheSidiFootprint);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.Sidi.SidiFootprint SidiFootprint()
+		{
+			return indicator.SidiFootprint(Input);
+		}
+
+		public Indicators.Sidi.SidiFootprint SidiFootprint(ISeries<double> input )
+		{
+			return indicator.SidiFootprint(input);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.Sidi.SidiFootprint SidiFootprint()
+		{
+			return indicator.SidiFootprint(Input);
+		}
+
+		public Indicators.Sidi.SidiFootprint SidiFootprint(ISeries<double> input )
+		{
+			return indicator.SidiFootprint(input);
+		}
+	}
+}
+
+#endregion
