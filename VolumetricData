@@ -1,0 +1,361 @@
+#region Using declarations
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.SuperDom;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.Core.FloatingPoint;
+using NinjaTrader.NinjaScript.DrawingTools;
+#endregion
+
+//This namespace holds Indicators in this folder and is required. Do not change it. 
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public class VolumetricData : Indicator
+	{
+		// This indicator will provide the volumetric Bar statistics in a hidden plot form.  This allows the values to be displayed in the charts Data box
+		// or the charts mini data box.  The main purpose is to provide the data points to the Strategy Builder and/or Chart alerts, and/or the Market analyzer.
+		// The plots are hidden so they will not change the display.
+		// The indicator must be applied to a chart or data series that uses Volumetric bars.
+		// There is an option, for debugging, to print the output to the Ninjascript output window.  This will show two values that should match on each line.
+		// One value is direct from the calculation and the other is from the plot (that gets it from the same calculation), again the point is to remove the 
+		// mystery of what data is being provided.
+		//
+		//  Created on 8-15-2022 by Tasker-182 FIO.
+		protected override void OnStateChange()
+		{
+			if (State == State.SetDefaults)
+			{
+				Description									= @"provides transparent plots of 18 data pionts per bar";
+				Name										= "VolumetricData";
+				Calculate									= Calculate.OnBarClose;
+				IsOverlay									= true;
+				DisplayInDataBox							= true;
+				DrawOnPricePanel							= true;
+				DrawHorizontalGridLines						= true;
+				DrawVerticalGridLines						= true;
+				PaintPriceMarkers							= true;
+				ScaleJustification							= NinjaTrader.Gui.Chart.ScaleJustification.Right;
+				ShowTransparentPlotsInDataBox						= true;
+				//Disable this property if your indicator requires custom values that cumulate with each new market data event. 
+				//See Help Guide for additional information.
+				IsSuspendedWhileInactive					= true;
+				ArePlotsConfigurable = false; // Plots are not configurable in the indicator dialog
+				AddPlot(Brushes.Transparent, "Trades");
+				AddPlot(Brushes.Transparent, "TotalVolume");
+				AddPlot(Brushes.Transparent, "TotalBuyingVolume");
+				AddPlot(Brushes.Transparent, "TotalSellingVolume");
+				AddPlot(Brushes.Transparent, "BarDelta");
+				AddPlot(Brushes.Transparent, "BarDeltaPercent");
+				AddPlot(Brushes.Transparent, "DeltaForClose");
+				AddPlot(Brushes.Transparent, "AskVolumeAtClose");
+				AddPlot(Brushes.Transparent, "BidVolumeAtClose");
+				AddPlot(Brushes.Transparent, "VolumeAtClose");
+				AddPlot(Brushes.Transparent, "MaximumAsk");
+				AddPlot(Brushes.Transparent, "MaximumBid");
+				AddPlot(Brushes.Transparent, "MaximumCombined");
+				AddPlot(Brushes.Transparent, "MaximumPositiveDelta");
+				AddPlot(Brushes.Transparent, "MaximumNegativeDelta");
+				AddPlot(Brushes.Transparent, "MaximumSeenBarDelta");
+				AddPlot(Brushes.Transparent, "MinimumSeenBarDelta");
+				AddPlot(Brushes.Transparent, "CumulativeBarDelta");
+				AddPlot(Brushes.Transparent, "MaximumAskPrice");
+				AddPlot(Brushes.Transparent, "MaximumBidPrice");
+				AddPlot(Brushes.Transparent, "MaximumCombinedPrice");
+				
+				ShowResults		= false;  // default not to show.
+			}
+		}
+
+		protected override void OnBarUpdate()
+		{
+			if (Bars == null)
+          		return;
+			
+        	NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType = Bars.BarsSeries.BarsType as     
+       			NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
+  
+        	if (barsType == null)
+          		return;
+        try
+        {
+			
+          	double price;  // local variable to get the Price @ 
+			
+			Trades[0] 				= barsType.Volumes[CurrentBar].Trades;
+			TotalVolume[0] 			= barsType.Volumes[CurrentBar].TotalVolume;
+			TotalBuyingVolume[0]	= barsType.Volumes[CurrentBar].TotalBuyingVolume;
+			TotalSellingVolume[0]	= barsType.Volumes[CurrentBar].TotalSellingVolume;
+			BarDelta[0]				= barsType.Volumes[CurrentBar].BarDelta;
+			BarDeltaPercent[0]		= barsType.Volumes[CurrentBar].GetDeltaPercent();
+			DeltaForClose[0]		= barsType.Volumes[CurrentBar].GetDeltaForPrice(Close[0]);
+			AskVolumeAtClose[0]		= barsType.Volumes[CurrentBar].GetAskVolumeForPrice(Close[0]);
+			BidVolumeAtClose[0]		= barsType.Volumes[CurrentBar].GetBidVolumeForPrice(Close[0]);
+			VolumeAtClose[0]		= barsType.Volumes[CurrentBar].GetTotalVolumeForPrice(Close[0]);
+			MaximumAsk[0]			= barsType.Volumes[CurrentBar].GetMaximumVolume(true, out price);
+			MaximumAskPrice[0]		= price;
+			MaximumBid[0]			= barsType.Volumes[CurrentBar].GetMaximumVolume(false, out price);
+			MaximumBidPrice[0]			= price;
+			MaximumCombined[0]		= barsType.Volumes[CurrentBar].GetMaximumVolume(null, out price);
+			MaximumCombinedPrice[0] = price;
+			MaximumPositiveDelta[0]	= barsType.Volumes[CurrentBar].GetMaximumPositiveDelta();
+			MaximumNegativeDelta[0] = barsType.Volumes[CurrentBar].GetMaximumNegativeDelta();
+			MaximumSeenBarDelta[0]	= barsType.Volumes[CurrentBar].MaxSeenDelta;
+			MinimumSeenBarDelta[0]	= barsType.Volumes[CurrentBar].MinSeenDelta;
+			CumulativeBarDelta[0]	= barsType.Volumes[CurrentBar].CumulativeDelta;
+			
+			if (ShowResults)
+			{
+				Print("=========================================================================");
+          		Print("Bar: " + CurrentBar+ "  BarClose time: "+Time[0]);
+         		Print("Trades: " + barsType.Volumes[CurrentBar].Trades+"  Plot Value = "+Trades[0]);
+          		Print("Total Volume: " + barsType.Volumes[CurrentBar].TotalVolume+"  Plot Value = "+TotalVolume[0]);
+          		Print("Total Buying Volume: " + barsType.Volumes[CurrentBar].TotalBuyingVolume+"  Plot Value = "+TotalBuyingVolume[0]);
+          		Print("Total Selling Volume: " + barsType.Volumes[CurrentBar].TotalSellingVolume+"  Plot Value = "+TotalSellingVolume[0]);
+          		Print("Delta for bar: " + barsType.Volumes[CurrentBar].BarDelta+"  Plot Value = "+BarDelta[0]);
+          		Print("Delta for bar (%): " + barsType.Volumes[CurrentBar].GetDeltaPercent()+"  Plot Value = "+BarDeltaPercent[0]);
+          		Print("Delta for Close: " + barsType.Volumes[CurrentBar].GetDeltaForPrice(Close[0])+"  Plot Value = "+DeltaForClose[0]);
+          		Print("Ask for Close: " + barsType.Volumes[CurrentBar].GetAskVolumeForPrice(Close[0])+"  Plot Value = "+AskVolumeAtClose[0]);
+          		Print("Bid for Close: " + barsType.Volumes[CurrentBar].GetBidVolumeForPrice(Close[0])+"  Plot Value = "+BidVolumeAtClose[0]);
+          		Print("Volume for Close: " + barsType.Volumes[CurrentBar].GetTotalVolumeForPrice(Close[0])+"  Plot Value = "+VolumeAtClose[0]);
+          		Print("Maximum Ask: " + barsType.Volumes[CurrentBar].GetMaximumVolume(true, out price) + " at price: " + price+"  Plot Value = "+MaximumAsk[0]+ "  at price: "+MaximumAskPrice[0]);
+          		Print("Maximum Bid: " + barsType.Volumes[CurrentBar].GetMaximumVolume(false, out price) + " at price: " + price+"  Plot Value = "+MaximumBid[0]+ "  at price: "+MaximumBidPrice[0]);
+          		Print("Maximum Combined: " + barsType.Volumes[CurrentBar].GetMaximumVolume(null, out price) + " at price: " + price+"  Plot Value = "+MaximumCombined[0]+ "  at price: "+MaximumCombinedPrice[0]);
+          		Print("Maximum Positive Delta: " + barsType.Volumes[CurrentBar].GetMaximumPositiveDelta()+"  Plot Value = "+MaximumPositiveDelta[0]);
+          		Print("Maximum Negative Delta: " + barsType.Volumes[CurrentBar].GetMaximumNegativeDelta()+"  Plot Value = "+MaximumNegativeDelta[0]);
+          		Print("Max seen delta (bar): " + barsType.Volumes[CurrentBar].MaxSeenDelta+"  Plot Value = "+MaximumSeenBarDelta[0]);
+          		Print("Min seen delta (bar): " + barsType.Volumes[CurrentBar].MinSeenDelta+"  Plot Value = "+MinimumSeenBarDelta[0]);
+          		Print("Cumulative delta (bar): " + barsType.Volumes[CurrentBar].CumulativeDelta+"  Plot Value = "+CumulativeBarDelta[0]);
+			}
+			
+        }
+        catch{}	
+		}
+
+		#region Properties
+		
+		[Display(Name="Print values to output window ", Description="Set true to display determined values per bar", Order=1, GroupName="Options")]
+		public bool ShowResults			
+		{ get; set; }
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> Trades
+		{
+			get { return Values[0]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> TotalVolume
+		{
+			get { return Values[1]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> TotalBuyingVolume
+		{
+			get { return Values[2]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> TotalSellingVolume
+		{
+			get { return Values[3]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> BarDelta
+		{
+			get { return Values[4]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> BarDeltaPercent
+		{
+			get { return Values[5]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> DeltaForClose
+		{
+			get { return Values[6]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> AskVolumeAtClose
+		{
+			get { return Values[7]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> BidVolumeAtClose
+		{
+			get { return Values[8]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> VolumeAtClose
+		{
+			get { return Values[9]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumAsk
+		{
+			get { return Values[10]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumBid
+		{
+			get { return Values[11]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumCombined
+		{
+			get { return Values[12]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumPositiveDelta
+		{
+			get { return Values[13]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumNegativeDelta
+		{
+			get { return Values[14]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumSeenBarDelta
+		{
+			get { return Values[15]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MinimumSeenBarDelta
+		{
+			get { return Values[16]; }
+		}
+
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> CumulativeBarDelta
+		{
+			get { return Values[17]; }
+		}
+		
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumAskPrice
+		{
+			get { return Values[18]; }
+		}
+		
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumBidPrice
+		{
+			get { return Values[19]; }
+		}
+		
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> MaximumCombinedPrice
+		{
+			get { return Values[20]; }
+		}
+		
+		#endregion
+
+	}
+}
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private VolumetricData[] cacheVolumetricData;
+		public VolumetricData VolumetricData()
+		{
+			return VolumetricData(Input);
+		}
+
+		public VolumetricData VolumetricData(ISeries<double> input)
+		{
+			if (cacheVolumetricData != null)
+				for (int idx = 0; idx < cacheVolumetricData.Length; idx++)
+					if (cacheVolumetricData[idx] != null &&  cacheVolumetricData[idx].EqualsInput(input))
+						return cacheVolumetricData[idx];
+			return CacheIndicator<VolumetricData>(new VolumetricData(), input, ref cacheVolumetricData);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.VolumetricData VolumetricData()
+		{
+			return indicator.VolumetricData(Input);
+		}
+
+		public Indicators.VolumetricData VolumetricData(ISeries<double> input )
+		{
+			return indicator.VolumetricData(input);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.VolumetricData VolumetricData()
+		{
+			return indicator.VolumetricData(Input);
+		}
+
+		public Indicators.VolumetricData VolumetricData(ISeries<double> input )
+		{
+			return indicator.VolumetricData(input);
+		}
+	}
+}
+
+#endregion
